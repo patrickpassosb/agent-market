@@ -4,7 +4,7 @@ from typing import Optional, Literal
 from pydantic import BaseModel, Field
 from litellm import completion
 from .base import BaseAgent
-from market.schema import MarketState, AgentAction
+from src.market.schema import MarketState, AgentAction
 
 # Define the structured output model for the LLM
 class TraderDecision(BaseModel):
@@ -14,7 +14,7 @@ class TraderDecision(BaseModel):
     reasoning: str = Field(description="Short reasoning for the decision, under 1 sentence.")
 
 class Trader(BaseAgent):
-    def __init__(self, agent_id: str, persona: str, model_name: str = "groq/llama3-8b-8192"):
+    def __init__(self, agent_id: str, persona: str, model_name: str = "groq/llama-3.1-8b-instant"):
         super().__init__(agent_id, persona)
         self.model_name = model_name
 

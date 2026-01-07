@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Optional
-from market.schema import MarketState, AgentAction, Transaction
-from memory.memory import AgentMemory
+from src.market.schema import MarketState, AgentAction, Transaction
+from src.memory.memory import AgentMemory
 
 class BaseAgent(ABC):
     def __init__(self, agent_id: str, persona: str):
