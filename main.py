@@ -52,14 +52,30 @@ def create_market_table(state) -> Panel:
     
     return Panel(table, title="Order Book & Price")
 
-# Smart Keywords for 70B Model
-SMART_KEYWORDS = ["investor", "whale", "market maker", "disciplined", "contrarian", "conservative"]
+# Model Keywords
+SMART_GROQ_KEYWORDS = ["whale", "market maker"]
+GEMINI_KEYWORDS = ["value", "patient", "long-term", "conservative"]
+OPENAI_KEYWORDS = ["algorithmic", "disciplined", "contrarian"]
 
 def get_model_for_persona(persona: str) -> str:
-    """Assigns the 70B model to 'smart' personas and 8B to simpler ones."""
-    persona_lower = persona.lower()
-    if any(k in persona_lower for k in SMART_KEYWORDS):
+    """
+    Assigns models based on persona characteristics:
+    - Smart/Big players -> Llama 70B (Groq)
+    - Analytical/Patient -> Gemini 1.5 Flash
+    - Structural/Rules  -> GPT-4o Mini
+    - Reactive/Fast     -> Llama 8B (Groq) - Default
+    """
+    p_lower = persona.lower()
+    
+    if any(k in p_lower for k in SMART_GROQ_KEYWORDS):
         return "groq/llama-3.3-70b-versatile"
+    
+    if any(k in p_lower for k in GEMINI_KEYWORDS):
+        return "gemini/gemini-1.5-flash"
+        
+    if any(k in p_lower for k in OPENAI_KEYWORDS):
+        return "openai/gpt-4o-mini"
+        
     return "groq/llama-3.1-8b-instant"
 
 def create_activity_table(agents: List[Trader], recent_actions: List[dict]) -> Panel:
@@ -77,9 +93,13 @@ def create_activity_table(agents: List[Trader], recent_actions: List[dict]) -> P
         # Format Model Name for display
         model_raw = agent_models.get(act['agent_id'], "?")
         if "70b" in model_raw:
-            model_display = "[bold cyan]70B[/]"
+            model_display = "[bold cyan]Llama 70B[/]"
+        elif "gemini" in model_raw:
+            model_display = "[bold blue]Gemini Flash[/]"
+        elif "gpt" in model_raw:
+            model_display = "[bold green]GPT-4o Mini[/]"
         else:
-            model_display = "[dim]8B[/]"
+            model_display = "[dim]Llama 8B[/]"
 
         table.add_row(
             f"{act['agent_id']} ({model_display})",
