@@ -1,0 +1,3719 @@
+Directory structure:
+└── samuelschmidgall-agentlaboratory/
+    ├── ai_lab_repo.py
+    ├── app.py
+    ├── common_imports.py
+    ├── inference.py
+    ├── LICENSE
+    ├── mlesolver.py
+    ├── papersolver.py
+    ├── requirements.txt
+    ├── tools.py
+    ├── utils.py
+    └── experiment_configs/
+        ├── MATH_agentlab.yaml
+        └── MATH_agentrxiv.yaml
+
+================================================
+FILE: ai_lab_repo.py
+================================================
+import PyPDF2
+import threading
+from app import *
+from agents import *
+from copy import copy
+from pathlib import Path
+from datetime import date
+from common_imports import *
+from mlesolver import MLESolver
+import argparse, pickle, yaml
+
+GLOBAL_AGENTRXIV = None
+DEFAULT_LLM_BACKBONE = "o3-mini"
+RESEARCH_DIR_PATH = "MATH_research_dir"
+
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+
+class LaboratoryWorkflow:
+    def __init__(self, research_topic, openai_api_key, max_steps=100, num_papers_lit_review=5, agent_model_backbone=f"{DEFAULT_LLM_BACKBONE}", notes=list(), human_in_loop_flag=None, compile_pdf=True, mlesolver_max_steps=3, papersolver_max_steps=5, paper_index=0, except_if_fail=False, parallelized=False, lab_dir=None, lab_index=0, agentRxiv=False, agentrxiv_papers=5):
+        """
+        Initialize laboratory workflow
+        @param research_topic: (str) description of research idea to explore
+        @param max_steps: (int) max number of steps for each phase, i.e. compute tolerance budget
+        @param num_papers_lit_review: (int) number of papers to include in the lit review
+        @param agent_model_backbone: (str or dict) model backbone to use for agents
+        @param notes: (list) notes for agent to follow during tasks
+        """
+        self.agentRxiv = agentRxiv
+        self.max_prev_papers = 10
+        self.parallelized = parallelized
+        self.notes = notes
+        self.lab_dir = lab_dir
+        self.lab_index = lab_index
+        self.max_steps = max_steps
+        self.compile_pdf = compile_pdf
+        self.paper_index = paper_index
+        self.openai_api_key = openai_api_key
+        self.except_if_fail = except_if_fail
+        self.research_topic = research_topic
+        self.model_backbone = agent_model_backbone
+        self.num_papers_lit_review = num_papers_lit_review
+
+        self.print_cost = True
+        self.review_override = True # should review be overridden?
+        self.review_ovrd_steps = 0 # review steps so far
+        self.arxiv_paper_exp_time = 3
+        self.reference_papers = list()
+
+        ##########################################
+        ####### COMPUTE BUDGET PARAMETERS ########
+        ##########################################
+        self.num_ref_papers = 1
+        self.review_total_steps = 0 # num steps to take if overridden
+        self.arxiv_num_summaries = 5
+        self.num_agentrxiv_papers = agentrxiv_papers
+        self.mlesolver_max_steps = mlesolver_max_steps
+        self.papersolver_max_steps = papersolver_max_steps
+
+        self.phases = [
+            ("literature review", ["literature review"]),
+            ("plan formulation", ["plan formulation"]),
+            ("experimentation", ["data preparation", "running experiments"]),
+            ("results interpretation", ["results interpretation", "report writing", "report refinement"]),
+        ]
+        self.phase_status = dict()
+        for phase, subtasks in self.phases:
+            for subtask in subtasks:
+                self.phase_status[subtask] = False
+
+        self.phase_models = dict()
+        if type(agent_model_backbone) == str:
+            for phase, subtasks in self.phases:
+                for subtask in subtasks:
+                    self.phase_models[subtask] = agent_model_backbone
+        elif type(agent_model_backbone) == dict:
+            # todo: check if valid
+            self.phase_models = agent_model_backbone
+
+        self.human_in_loop_flag = human_in_loop_flag
+
+        self.statistics_per_phase = {
+            "literature review":      {"time": 0.0, "steps": 0.0,},
+            "plan formulation":       {"time": 0.0, "steps": 0.0,},
+            "data preparation":       {"time": 0.0, "steps": 0.0,},
+            "running experiments":    {"time": 0.0, "steps": 0.0,},
+            "results interpretation": {"time": 0.0, "steps": 0.0,},
+            "report writing":         {"time": 0.0, "steps": 0.0,},
+            "report refinement":      {"time": 0.0, "steps": 0.0,},
+        }
+
+        self.save = True
+        self.verbose = True
+        self.reviewers = ReviewersAgent(model=self.model_backbone, notes=self.notes, openai_api_key=self.openai_api_key)
+        self.phd = PhDStudentAgent(model=self.model_backbone, notes=self.notes, max_steps=self.max_steps, openai_api_key=self.openai_api_key)
+        self.postdoc = PostdocAgent(model=self.model_backbone, notes=self.notes, max_steps=self.max_steps, openai_api_key=self.openai_api_key)
+        self.professor = ProfessorAgent(model=self.model_backbone, notes=self.notes, max_steps=self.max_steps, openai_api_key=self.openai_api_key)
+        self.ml_engineer = MLEngineerAgent(model=self.model_backbone, notes=self.notes, max_steps=self.max_steps, openai_api_key=self.openai_api_key)
+        self.sw_engineer = SWEngineerAgent(model=self.model_backbone, notes=self.notes, max_steps=self.max_steps, openai_api_key=self.openai_api_key)
+
+
+    def set_model(self, model):
+        self.set_agent_attr("model", model)
+        self.reviewers.model = model
+
+    def save_state(self, phase):
+        """
+        Save state for phase
+        @param phase: (str) phase string
+        @return: None
+        """
+        with open(f"state_saves/Paper{self.paper_index}.pkl", "wb") as f:
+            pickle.dump(self, f)
+
+    def set_agent_attr(self, attr, obj):
+        """
+        Set attribute for all agents
+        @param attr: (str) agent attribute
+        @param obj: (object) object attribute
+        @return: None
+        """
+        setattr(self.phd, attr, obj)
+        setattr(self.postdoc, attr, obj)
+        setattr(self.professor, attr, obj)
+        setattr(self.ml_engineer, attr, obj)
+        setattr(self.sw_engineer, attr, obj)
+
+    def reset_agents(self):
+        """
+        Reset all agent states
+        @return: None
+        """
+        self.phd.reset()
+        self.postdoc.reset()
+        self.professor.reset()
+        self.ml_engineer.reset()
+        self.sw_engineer.reset()
+
+    def perform_research(self):
+        """
+        Loop through all research phases
+        @return: None
+        """
+        for phase, subtasks in self.phases:
+            phase_start_time = time.time()  # Start timing the phase
+            if self.verbose: print(f"{'*'*50}\nBeginning phase: {phase}\n{'*'*50}")
+            for subtask in subtasks:
+                if self.agentRxiv:
+                    if self.verbose: print(f"{'&' * 30}\n[Lab #{self.lab_index} Paper #{self.paper_index}] Beginning subtask: {subtask}\n{'&' * 30}")
+                else:
+                    if self.verbose: print(f"{'&'*30}\nBeginning subtask: {subtask}\n{'&'*30}")
+                if type(self.phase_models) == dict:
+                    if subtask in self.phase_models:
+                        self.set_model(self.phase_models[subtask])
+                    else: self.set_model(f"{DEFAULT_LLM_BACKBONE}")
+                if (subtask not in self.phase_status or not self.phase_status[subtask]) and subtask == "literature review":
+                    repeat = True
+                    while repeat: repeat = self.literature_review()
+                    self.phase_status[subtask] = True
+                if (subtask not in self.phase_status or not self.phase_status[subtask]) and subtask == "plan formulation":
+                    repeat = True
+                    while repeat: repeat = self.plan_formulation()
+                    self.phase_status[subtask] = True
+                if (subtask not in self.phase_status or not self.phase_status[subtask]) and subtask == "data preparation":
+                    repeat = True
+                    while repeat: repeat = self.data_preparation()
+                    self.phase_status[subtask] = True
+                if (subtask not in self.phase_status or not self.phase_status[subtask]) and subtask == "running experiments":
+                    repeat = True
+                    while repeat: repeat = self.running_experiments()
+                    self.phase_status[subtask] = True
+                if (subtask not in self.phase_status or not self.phase_status[subtask]) and subtask == "results interpretation":
+                    repeat = True
+                    while repeat: repeat = self.results_interpretation()
+                    self.phase_status[subtask] = True
+                if (subtask not in self.phase_status or not self.phase_status[subtask]) and subtask == "report writing":
+                    repeat = True
+                    while repeat: repeat = self.report_writing()
+                    self.phase_status[subtask] = True
+                if (subtask not in self.phase_status or not self.phase_status[subtask]) and subtask == "report refinement":
+                    return_to_exp_phase = self.report_refinement()
+
+                    if not return_to_exp_phase:
+                        if self.save: self.save_state(subtask)
+                        return
+
+                    self.set_agent_attr("second_round", return_to_exp_phase)
+                    self.set_agent_attr("prev_report", copy(self.phd.report))
+                    self.set_agent_attr("prev_exp_results", copy(self.phd.exp_results))
+                    self.set_agent_attr("prev_results_code", copy(self.phd.results_code))
+                    self.set_agent_attr("prev_interpretation", copy(self.phd.interpretation))
+
+                    self.phase_status["plan formulation"] = False
+                    self.phase_status["data preparation"] = False
+                    self.phase_status["running experiments"] = False
+                    self.phase_status["results interpretation"] = False
+                    self.phase_status["report writing"] = False
+                    self.phase_status["report refinement"] = False
+                    self.perform_research()
+                if self.save: self.save_state(subtask)
+                # Calculate and print the duration of the phase
+                phase_end_time = time.time()
+                phase_duration = phase_end_time - phase_start_time
+                print(f"Subtask '{subtask}' completed in {phase_duration:.2f} seconds.")
+                self.statistics_per_phase[subtask]["time"] = phase_duration
+
+    def report_refinement(self):
+        """
+        Perform report refinement phase
+        @return: (bool) whether to repeat the phase
+        """
+        reviews = self.reviewers.inference(self.phd.plan, self.phd.report)
+        print("Reviews:", reviews)
+        if self.human_in_loop_flag["report refinement"]:
+            print(f"Provided are reviews from a set of three reviewers: {reviews}")
+            input("Would you like to be completed with the project or should the agents go back and improve their experimental results?\n (y) for go back (n) for complete project: ")
+        else:
+            review_prompt = f"Provided are reviews from a set of three reviewers: {reviews}. Would you like to be completed with the project or do you want to go back to the planning phase and improve your experiments?\n Type y and nothing else to go back, type n and nothing else for complete project."
+            self.phd.phases.append("report refinement")
+            if self.review_override:
+                if self.review_total_steps == self.review_ovrd_steps:
+                    response = "n"
+                else:
+                    response = "y"
+                    self.review_ovrd_steps += 1
+            else:
+                response = self.phd.inference(
+                    research_topic=self.research_topic, phase="report refinement", feedback=review_prompt, step=0)
+            if len(response) == 0:
+                raise Exception("Model did not respond")
+            response = response.lower().strip()[0]
+            if response == "n":
+                if self.verbose: print("*"*40, "\n", "REVIEW COMPLETE", "\n", "*"*40)
+                return False
+            elif response == "y":
+                self.set_agent_attr("reviewer_response", f"Provided are reviews from a set of three reviewers: {reviews}.")
+                return True
+            else: raise Exception("Model did not respond")
+
+    def report_writing(self):
+        """
+        Perform report writing phase
+        @return: (bool) whether to repeat the phase
+        """
+        # experiment notes
+        report_notes = [_note["note"] for _note in self.ml_engineer.notes if "report writing" in _note["phases"]]
+        report_notes = f"Notes for the task objective: {report_notes}\n" if len(report_notes) > 0 else ""
+        # instantiate mle-solver
+        from papersolver import PaperSolver
+        self.reference_papers = []
+        solver = PaperSolver(notes=report_notes, max_steps=self.papersolver_max_steps, plan=self.phd.plan, exp_code=self.phd.results_code, exp_results=self.phd.exp_results, insights=self.phd.interpretation, lit_review=self.phd.lit_review, ref_papers=self.reference_papers, topic=research_topic, openai_api_key=self.openai_api_key, llm_str=self.model_backbone["report writing"], compile_pdf=compile_pdf, save_loc=self.lab_dir)
+        # run initialization for solver
+        solver.initial_solve()
+        # run solver for N mle optimization steps
+        for _ in range(self.papersolver_max_steps): solver.solve()
+        # get best report results
+        report = "\n".join(solver.best_report[0][0])
+        score = solver.best_report[0][1]
+        match = re.search(r'\\title\{([^}]*)\}', report)
+        if match: report_title = match.group(1).replace(" ", "_")
+        else: report_title = "\n".join([str(random.randint(0, 10)) for _ in range(10)])
+        if self.agentRxiv: shutil.copyfile(self.lab_dir + "/tex/temp.pdf", f"uploads/{report_title}.pdf")
+        if self.verbose: print(f"Report writing completed, reward function score: {score}")
+        if self.human_in_loop_flag["report writing"]:
+            retry = self.human_in_loop("report writing", report)
+            if retry: return retry
+        self.set_agent_attr("report", report)
+        readme = self.professor.generate_readme()
+        save_to_file(f"./{self.lab_dir}", "readme.md", readme)
+        save_to_file(f"./{self.lab_dir}", "report.txt", report)
+        self.reset_agents()
+        return False
+
+    def results_interpretation(self):
+        """
+        Perform results interpretation phase
+        @return: (bool) whether to repeat the phase
+        """
+        max_tries = self.max_steps
+        dialogue = str()
+        # iterate until max num tries to complete task is exhausted
+        for _i in range(max_tries):
+            print(f"@@ Lab #{self.lab_index} Paper #{self.paper_index} @@")
+            resp = self.postdoc.inference(self.research_topic, "results interpretation", feedback=dialogue, step=_i)
+            if self.verbose: print("Postdoc: ", resp, "\n~~~~~~~~~~~")
+            dialogue = str()
+            if "```DIALOGUE" in resp:
+                dialogue = extract_prompt(resp, "DIALOGUE")
+                dialogue = f"The following is dialogue produced by the postdoctoral researcher: {dialogue}"
+                if self.verbose: print("#"*40, "\n", "Postdoc Dialogue:", dialogue, "\n", "#"*40)
+            if "```INTERPRETATION" in resp:
+                interpretation = extract_prompt(resp, "INTERPRETATION")
+                if self.human_in_loop_flag["results interpretation"]:
+                    retry = self.human_in_loop("results interpretation", interpretation)
+                    if retry: return retry
+                self.set_agent_attr("interpretation", interpretation)
+                # reset agent state
+                self.reset_agents()
+                self.statistics_per_phase["results interpretation"]["steps"] = _i
+                return False
+            resp = self.phd.inference(self.research_topic, "results interpretation", feedback=dialogue, step=_i)
+            if self.verbose: print("PhD Student: ", resp, "\n~~~~~~~~~~~")
+            dialogue = str()
+            if "```DIALOGUE" in resp:
+                dialogue = extract_prompt(resp, "DIALOGUE")
+                dialogue = f"The following is dialogue produced by the PhD student: {dialogue}"
+                if self.verbose: print("#"*40, "\n", "PhD Dialogue:", dialogue, "#"*40, "\n")
+        raise Exception("Max tries during phase: Results Interpretation")
+
+    def running_experiments(self):
+        """
+        Perform running experiments phase
+        @return: (bool) whether to repeat the phase
+        """
+        # experiment notes
+        experiment_notes = [_note["note"] for _note in self.ml_engineer.notes if "running experiments" in _note["phases"]]
+        experiment_notes = f"Notes for the task objective: {experiment_notes}\n" if len(experiment_notes) > 0 else ""
+        # instantiate mle-solver
+        solver = MLESolver(dataset_code=self.ml_engineer.dataset_code, notes=experiment_notes, insights=self.ml_engineer.lit_review_sum, max_steps=self.mlesolver_max_steps, plan=self.ml_engineer.plan, openai_api_key=self.openai_api_key, llm_str=self.model_backbone["running experiments"])
+        # run initialization for solver
+        solver.initial_solve()
+        # run solver for N mle optimization steps
+        for _ in range(self.mlesolver_max_steps-1):
+            solver.solve()
+        # get best code results
+        code = "\n".join(solver.best_codes[0][0])
+        # regenerate figures from top code
+        #execute_code(code)
+        score = solver.best_codes[0][1]
+        exp_results = solver.best_codes[0][2]
+        if self.verbose: print(f"Running experiments completed, reward function score: {score}")
+        if self.human_in_loop_flag["running experiments"]:
+            retry = self.human_in_loop("data preparation", code)
+            if retry: return retry
+        save_to_file(f"./{self.lab_dir}/src", "run_experiments.py", code)
+        save_to_file(f"./{self.lab_dir}/src", "experiment_output.log", exp_results)
+        self.set_agent_attr("results_code", code)
+        self.set_agent_attr("exp_results", exp_results)
+        # reset agent state
+        self.reset_agents()
+        return False
+
+    def data_preparation(self):
+        """
+        Perform data preparation phase
+        @return: (bool) whether to repeat the phase
+        """
+        max_tries = self.max_steps
+        ml_feedback = str()
+        ml_dialogue = str()
+        swe_feedback = str()
+        ml_command = str()
+        hf_engine = HFDataSearch()
+        # iterate until max num tries to complete task is exhausted
+        for _i in range(max_tries):
+            print(f"@@ Lab #{self.lab_index} Paper #{self.paper_index} @@")
+            if ml_feedback != "":
+                ml_feedback_in = "Feedback provided to the ML agent: " + ml_feedback
+            else: ml_feedback_in = ""
+            resp = self.sw_engineer.inference(self.research_topic, "data preparation", feedback=f"{ml_dialogue}\nFeedback from previous command: {swe_feedback}\n{ml_command}{ml_feedback_in}", step=_i)
+            swe_feedback = str()
+            swe_dialogue = str()
+            if "```DIALOGUE" in resp:
+                dialogue = extract_prompt(resp, "DIALOGUE")
+                swe_dialogue = f"\nThe following is dialogue produced by the SW Engineer: {dialogue}\n"
+                if self.verbose: print("#"*40, f"\nThe following is dialogue produced by the SW Engineer: {dialogue}", "\n", "#"*40)
+            if "```SUBMIT_CODE" in resp:
+                final_code = extract_prompt(resp, "SUBMIT_CODE")
+                code_resp = execute_code(final_code, timeout=60)
+                if self.verbose: print("!"*100, "\n", f"CODE RESPONSE: {code_resp}")
+                swe_feedback += f"\nCode Response: {code_resp}\n"
+                if "[CODE EXECUTION ERROR]" in code_resp:
+                    swe_feedback += "\nERROR: Final code had an error and could not be submitted! You must address and fix this error.\n"
+                else:
+                    if self.human_in_loop_flag["data preparation"]:
+                        retry = self.human_in_loop("data preparation", final_code)
+                        if retry: return retry
+                    save_to_file(f"./{self.lab_dir}/src", "load_data.py", final_code)
+                    self.set_agent_attr("dataset_code", final_code)
+                    # reset agent state
+                    self.reset_agents()
+                    self.statistics_per_phase["data preparation"]["steps"] = _i
+                    return False
+
+            if ml_feedback != "":
+                ml_feedback_in = "Feedback from previous command: " + ml_feedback
+            else:
+                ml_feedback_in = ""
+            resp = self.ml_engineer.inference(
+                self.research_topic, "data preparation",
+                feedback=f"{swe_dialogue}\n{ml_feedback_in}", step=_i)
+            #if self.verbose: print("ML Engineer: ", resp, "\n~~~~~~~~~~~")
+            ml_feedback = str()
+            ml_dialogue = str()
+            ml_command = str()
+            if "```DIALOGUE" in resp:
+                dialogue = extract_prompt(resp, "DIALOGUE")
+                ml_dialogue = f"\nThe following is dialogue produced by the ML Engineer: {dialogue}\n"
+                if self.verbose: print("#" * 40, f"\nThe following is dialogue produced by the ML Engineer: {dialogue}", "#" * 40, "\n")
+            if "```python" in resp:
+                code = extract_prompt(resp, "python")
+                code = self.ml_engineer.dataset_code + "\n" + code
+                code_resp = execute_code(code, timeout=120)
+                ml_command = f"Code produced by the ML agent:\n{code}"
+                ml_feedback += f"\nCode Response: {code_resp}\n"
+                if self.verbose: print("!"*100, "\n", f"CODE RESPONSE: {code_resp}")
+            if "```SEARCH_HF" in resp:
+                hf_query = extract_prompt(resp, "SEARCH_HF")
+                hf_res = "\n".join(hf_engine.results_str(hf_engine.retrieve_ds(hf_query)))
+                ml_command = f"HF search command produced by the ML agent:\n{hf_query}"
+                ml_feedback += f"Huggingface results: {hf_res}\n"
+        raise Exception("Max tries during phase: Data Preparation")
+
+    def plan_formulation(self):
+        """
+        Perform plan formulation phase
+        @return: (bool) whether to repeat the phase
+        """
+        max_tries = self.max_steps
+        dialogue = str()
+        # iterate until max num tries to complete task is exhausted
+        for _i in range(max_tries):
+            print(f"@@ Lab #{self.lab_index} Paper #{self.paper_index} @@")
+            # inference postdoc to
+            resp = self.postdoc.inference(self.research_topic, "plan formulation", feedback=dialogue, step=_i)
+            if self.verbose: print("Postdoc: ", resp, "\n~~~~~~~~~~~")
+            dialogue = str()
+
+            if "```DIALOGUE" in resp:
+                dialogue = extract_prompt(resp, "DIALOGUE")
+                dialogue = f"The following is dialogue produced by the postdoctoral researcher: {dialogue}"
+                if self.verbose: print("#"*40, "\n", "Postdoc Dialogue:", dialogue, "\n", "#"*40)
+
+            if "```PLAN" in resp:
+                plan = extract_prompt(resp, "PLAN")
+                if self.human_in_loop_flag["plan formulation"]:
+                    retry = self.human_in_loop("plan formulation", plan)
+                    if retry: return retry
+                self.set_agent_attr("plan", plan)
+                # reset agent state
+                self.reset_agents()
+                self.statistics_per_phase["plan formulation"]["steps"] = _i
+                return False
+
+            resp = self.phd.inference(self.research_topic, "plan formulation", feedback=dialogue, step=_i)
+            if self.verbose: print("PhD Student: ", resp, "\n~~~~~~~~~~~")
+
+            dialogue = str()
+            if "```DIALOGUE" in resp:
+                dialogue = extract_prompt(resp, "DIALOGUE")
+                dialogue = f"The following is dialogue produced by the PhD student: {dialogue}"
+                if self.verbose: print("#"*40, "\n", "PhD Dialogue:", dialogue, "#"*40, "\n")
+        if self.except_if_fail:
+            raise Exception("Max tries during phase: Plan Formulation")
+        else:
+            plan = "No plan specified."
+            if self.human_in_loop_flag["plan formulation"]:
+                retry = self.human_in_loop("plan formulation", plan)
+                if retry: return retry
+            self.set_agent_attr("plan", plan)
+            # reset agent state
+            self.reset_agents()
+            return False
+
+    def literature_review(self):
+        """
+        Perform literature review phase
+        @return: (bool) whether to repeat the phase
+        """
+        arx_eng = ArxivSearch()
+        max_tries = self.max_steps # lit review often requires extra steps
+        # get initial response from PhD agent
+        resp = self.phd.inference(self.research_topic, "literature review", step=0, temp=0.4)
+        if self.verbose: print(resp, "\n~~~~~~~~~~~")
+        # iterate until max num tries to complete task is exhausted
+        for _i in range(max_tries):
+            print(f"@@ Lab #{self.lab_index} Paper #{self.paper_index} @@")
+            feedback = str()
+            # grab summary of papers from arxiv
+            if "```SUMMARY" in resp:
+                query = extract_prompt(resp, "SUMMARY")
+                papers = arx_eng.find_papers_by_str(query, N=self.arxiv_num_summaries)
+                if self.agentRxiv:
+                    if GLOBAL_AGENTRXIV.num_papers() > 0:
+                        papers += GLOBAL_AGENTRXIV.search_agentrxiv(query, self.num_agentrxiv_papers,)
+                feedback = f"You requested arXiv papers related to the query {query}, here was the response\n{papers}"
+
+            # grab full text from arxiv ID
+            elif "```FULL_TEXT" in resp:
+                query = extract_prompt(resp, "FULL_TEXT")
+                if self.agentRxiv and "AgentRxiv" in query: full_text = GLOBAL_AGENTRXIV.retrieve_full_text(query,)
+                else: full_text = arx_eng.retrieve_full_paper_text(query)
+                # expiration timer so that paper does not remain in context too long
+                arxiv_paper = f"```EXPIRATION {self.arxiv_paper_exp_time}\n" + full_text + "```"
+                feedback = arxiv_paper
+
+            # if add paper, extract and add to lit review, provide feedback
+            elif "```ADD_PAPER" in resp:
+                query = extract_prompt(resp, "ADD_PAPER")
+                if self.agentRxiv and "AgentRxiv" in query: feedback, text = self.phd.add_review(query, arx_eng, agentrxiv=True, GLOBAL_AGENTRXIV=GLOBAL_AGENTRXIV)
+                else: feedback, text = self.phd.add_review(query, arx_eng)
+                if len(self.reference_papers) < self.num_ref_papers:
+                    self.reference_papers.append(text)
+
+            # completion condition
+            if len(self.phd.lit_review) >= self.num_papers_lit_review:
+                # generate formal review
+                lit_review_sum = self.phd.format_review()
+                # if human in loop -> check if human is happy with the produced review
+                if self.human_in_loop_flag["literature review"]:
+                    retry = self.human_in_loop("literature review", lit_review_sum)
+                    # if not happy, repeat the process with human feedback
+                    if retry:
+                        self.phd.lit_review = []
+                        return retry
+                # otherwise, return lit review and move on to next stage
+                if self.verbose: print(self.phd.lit_review_sum)
+                # set agent
+                self.set_agent_attr("lit_review_sum", lit_review_sum)
+                # reset agent state
+                self.reset_agents()
+                self.statistics_per_phase["literature review"]["steps"] = _i
+                return False
+            resp = self.phd.inference(self.research_topic, "literature review", feedback=feedback, step=_i + 1, temp=0.4)
+            if self.verbose: print(resp, "\n~~~~~~~~~~~")
+        if self.except_if_fail: raise Exception("Max tries during phase: Literature Review")
+        else:
+            if len(self.phd.lit_review) >= self.num_papers_lit_review:
+                # generate formal review
+                lit_review_sum = self.phd.format_review()
+                # if human in loop -> check if human is happy with the produced review
+                if self.human_in_loop_flag["literature review"]:
+                    retry = self.human_in_loop("literature review", lit_review_sum)
+                    # if not happy, repeat the process with human feedback
+                    if retry:
+                        self.phd.lit_review = []
+                        return retry
+                # otherwise, return lit review and move on to next stage
+                if self.verbose: print(self.phd.lit_review_sum)
+                # set agent
+                self.set_agent_attr("lit_review_sum", lit_review_sum)
+                # reset agent state
+                self.reset_agents()
+                self.statistics_per_phase["literature review"]["steps"] = _i
+                return False
+
+    def human_in_loop(self, phase, phase_prod):
+        """
+        Get human feedback for phase output
+        @param phase: (str) current phase
+        @param phase_prod: (str) current phase result
+        @return: (bool) whether to repeat the loop
+        """
+        print("\n\n\n\n\n")
+        print(f"Presented is the result of the phase [{phase}]: {phase_prod}")
+        y_or_no = None
+        # repeat until a valid answer is provided
+        while y_or_no not in ["y", "n"]:
+            y_or_no = input("\n\n\nAre you happy with the presented content? Respond Y or N: ").strip().lower()
+            # if person is happy with feedback, move on to next stage
+            if y_or_no == "y": pass
+            # if not ask for feedback and repeat
+            elif y_or_no == "n":
+                # ask the human for feedback
+                notes_for_agent = input("Please provide notes for the agent so that they can try again and improve performance: ")
+                # reset agent state
+                self.reset_agents()
+                # add suggestions to the notes
+                self.notes.append({
+                    "phases": [phase],
+                    "note": notes_for_agent})
+                return True
+            else: print("Invalid response, type Y or N")
+        return False
+
+class AgentRxiv:
+    def __init__(self, lab_index=0):
+        self.lab_index = lab_index
+        self.server_thread = None
+        self.initialize_server()
+        self.pdf_text = dict()
+        self.summaries = dict()
+
+    def initialize_server(self):
+        # Calculate the port dynamically
+        port = 5000 + self.lab_index
+        # Start the server on the computed port using a lambda to pass the port value
+        self.server_thread = threading.Thread(target=lambda: self.run_server(port))
+        self.server_thread.daemon = True
+        self.server_thread.start()
+        time.sleep(5)  # allow time for the server to start up
+
+    @staticmethod
+    def num_papers():
+        return len(os.listdir("uploads"))
+
+    def retrieve_full_text(self, arxiv_id):
+        try:
+            return self.pdf_text[arxiv_id]
+        except Exception:
+            return "Paper ID not found?"
+
+    @staticmethod
+    def read_pdf_pypdf2(pdf_path):
+        with open(pdf_path, 'rb') as pdf_file:
+            reader = PyPDF2.PdfReader(pdf_file)
+            text = ''
+            for page_num in range(len(reader.pages)):
+                page = reader.pages[page_num]
+                text += page.extract_text()
+        return text
+
+    def search_agentrxiv(self, search_query, num_papers):
+        # Use the dynamic port here as well
+        url = f'http://127.0.0.1:{5000 + self.lab_index}/api/search?q={search_query}'
+        return_str = str()
+        try:
+            with app.app_context():
+                update_papers_from_uploads()
+            response = requests.get(url)
+            response.raise_for_status()
+            data = response.json()
+            return_str += "Search Query:" + data['query']
+            return_str += "Results:"
+            for result in data['results'][:num_papers]:
+                arxiv_id = f"AgentRxiv:ID_{result['id']}"
+                if arxiv_id not in self.summaries:
+                    filename = Path(f'_tmp_{self.lab_index}.pdf')
+                    response = requests.get(result['pdf_url'])
+                    filename.write_bytes(response.content)
+                    self.pdf_text[arxiv_id] = self.read_pdf_pypdf2(f'_tmp_{self.lab_index}.pdf')
+                    self.summaries[arxiv_id] = query_model(
+                        prompt=self.pdf_text[arxiv_id],
+                        system_prompt="Please provide a 5 sentence summary of this paper.",
+                        openai_api_key=os.getenv('OPENAI_API_KEY'),
+                        model_str="gpt-4o-mini"
+                    )
+                return_str += f"Title: {result['filename']}"
+                return_str += f"Summary: {self.summaries[arxiv_id]}\n"
+                formatted_date = date.today().strftime("%d/%m/%Y")
+                return_str += f"Publication Date: {formatted_date}\n"
+                return_str += f"arXiv paper ID: AgentRxiv:ID_{result['id']}"
+                return_str += "-" * 40
+        except Exception as e:
+            print(f"AgentRxiv Error: {e}")
+            return_str += f"Error: {e}"
+        return return_str
+
+    def run_server(self, port):
+        run_app(port=port)
+
+
+def parse_arguments():
+    parser = argparse.ArgumentParser(description="AgentLaboratory Research Workflow")
+
+    parser.add_argument(
+        '--yaml-location',
+        type=str,
+        default="experiment_configs/MATH_agentlab.yaml",
+        help='Location of YAML to load config data.'
+    )
+
+    return parser.parse_args()
+
+
+def parse_yaml(yaml_file_loc):
+    with open(yaml_file_loc, 'r') as file: agentlab_data = yaml.safe_load(file)
+    class YamlDataHolder:
+        def __init__(self): pass
+    parser = YamlDataHolder()
+    if "copilot_mode" in agentlab_data: parser.copilot_mode = agentlab_data["copilot_mode"]
+    else: parser.copilot_mode = False
+    if 'load-previous' in agentlab_data: parser.load_previous = agentlab_data["load-previous"]
+    else: parser.load_previous = False
+    if 'research-topic' in agentlab_data: parser.research_topic = agentlab_data["research-topic"]
+    if 'api-key' in agentlab_data: parser.api_key = agentlab_data["api-key"]
+    if 'deepseek-api-key' in agentlab_data: parser.deepseek_api_key = agentlab_data["deepseek-api-key"]
+    if 'compile-latex' in agentlab_data: parser.compile_latex = agentlab_data["compile-latex"]
+    else: parser.compile_latex = True
+    if 'llm-backend' in agentlab_data: parser.llm_backend = agentlab_data["llm-backend"]
+    else: parser.llm_backend = "o3-mini"
+    if 'lit-review-backend' in agentlab_data: parser.lit_review_backend = agentlab_data["lit-review-backend"]
+    else: parser.lit_review_backend = "gpt-4o-mini"
+    if 'language' in agentlab_data: parser.language = agentlab_data["language"]
+    else: parser.language = "English"
+    if 'num-papers-lit-review' in agentlab_data: parser.num_papers_lit_review = agentlab_data["num-papers-lit-review"]
+    else: parser.num_papers_lit_review = 5
+    if 'mlesolver-max-steps' in agentlab_data: parser.mlesolver_max_steps = agentlab_data["mlesolver-max-steps"]
+    else: parser.mlesolver_max_steps = 3
+    if 'papersolver-max-steps' in agentlab_data: parser.papersolver_max_steps = agentlab_data["papersolver-max-steps"]
+    else: parser.papersolver_max_steps = 5
+    if 'task-notes' in agentlab_data: parser.task_notes = agentlab_data["task-notes"]
+    else: parser.task_notes = []
+    if 'num-papers-to-write' in agentlab_data: parser.num_papers_to_write = agentlab_data["num-papers-to-write"]
+    else: parser.num_papers_to_write = 100
+    if 'parallel-labs' in agentlab_data: parser.parallel_labs = agentlab_data["parallel-labs"]
+    else: parser.parallel_labs = False
+    if 'num-parallel-labs' in agentlab_data: parser.num_parallel_labs = agentlab_data["num-parallel-labs"]
+    else: parser.num_parallel_labs = 8
+    if 'except-if-fail' in agentlab_data: parser.except_if_fail = agentlab_data["except-if-fail"]
+    else: parser.except_if_fail = False
+    if 'agentRxiv' in agentlab_data: parser.agentRxiv = agentlab_data["agentRxiv"]
+    else: parser.agentRxiv = False
+    if 'construct-agentRxiv' in agentlab_data: parser.construct_agentRxiv = agentlab_data["construct-agentRxiv"]
+    else: parser.construct_agentRxiv = False
+    if 'agentrxiv-papers' in agentlab_data: parser.agentrxiv_papers = agentlab_data["agentrxiv-papers"]
+    else:  parser.agentrxiv_papers = 5
+
+    if 'lab-index' in agentlab_data: parser.lab_index = agentlab_data["lab-index"]
+    else: parser.lab_index = 0
+    return parser
+
+
+if __name__ == "__main__":
+    user_args = parse_arguments()
+    yaml_to_use = user_args.yaml_location
+    args = parse_yaml(yaml_to_use)
+
+    llm_backend = args.llm_backend
+    human_mode =  args.copilot_mode.lower() == "true" if type(args.copilot_mode) == str else args.copilot_mode
+    compile_pdf = args.compile_latex.lower() == "true" if type(args.compile_latex) == str else args.compile_latex
+    load_previous = args.load_previous.lower() == "true" if type(args.load_previous) == str else args.load_previous
+    parallel_labs = args.parallel_labs.lower() == "true" if type(args.parallel_labs) == str else args.parallel_labs
+    except_if_fail = args.except_if_fail.lower() == "true" if type(args.except_if_fail) == str else args.except_if_fail
+    agentRxiv = args.agentRxiv.lower() == "true" if type(args.agentRxiv) == str else args.agentRxiv
+    construct_agentRxiv = args.construct_agentRxiv.lower() == "true" if type(args.construct_agentRxiv) == str else args.construct_agentRxiv
+    lab_index = int(args.lab_index) if type(args.construct_agentRxiv) == str else args.lab_index
+
+    try: num_papers_to_write = int(args.num_papers_to_write.lower()) if type(args.num_papers_to_write) == str else args.num_papers_to_write
+    except Exception: raise Exception("args.num_papers_lit_review must be a valid integer!")
+    try: num_papers_lit_review = int(args.num_papers_lit_review.lower()) if type(args.num_papers_lit_review) == str else args.num_papers_lit_review
+    except Exception: raise Exception("args.num_papers_lit_review must be a valid integer!")
+    try: papersolver_max_steps = int(args.papersolver_max_steps.lower()) if type(args.papersolver_max_steps) == str else args.papersolver_max_steps
+    except Exception: raise Exception("args.papersolver_max_steps must be a valid integer!")
+    try: mlesolver_max_steps = int(args.mlesolver_max_steps.lower()) if type(args.mlesolver_max_steps) == str else args.mlesolver_max_steps
+    except Exception: raise Exception("args.mlesolver_max_steps must be a valid integer!")
+    if parallel_labs:
+        num_parallel_labs = int(args.num_parallel_labs)
+        print("="*20 , f"RUNNING {num_parallel_labs} LABS IN PARALLEL", "="*20)
+    else: num_parallel_labs = 0
+
+    api_key = (os.getenv('OPENAI_API_KEY') or args.api_key) if (hasattr(args, 'api_key') or os.getenv('OPENAI_API_KEY')) else None
+    deepseek_api_key = (os.getenv('DEEPSEEK_API_KEY') or args.deepseek_api_key) if (hasattr(args, 'deepseek_api_key') or os.getenv('DEEPSEEK_API_KEY')) else None
+    if api_key is not None and os.getenv('OPENAI_API_KEY') is None: os.environ["OPENAI_API_KEY"] = args.api_key
+    if deepseek_api_key is not None and os.getenv('DEEPSEEK_API_KEY') is None: os.environ["DEEPSEEK_API_KEY"] = args.deepseek_api_key
+
+    if not api_key and not deepseek_api_key: raise ValueError("API key must be provided via --api-key / -deepseek-api-key or the OPENAI_API_KEY / DEEPSEEK_API_KEY environment variable.")
+
+    if human_mode or args.research_topic is None: research_topic = input("Please name an experiment idea for AgentLaboratory to perform: ")
+    else: research_topic = args.research_topic
+
+    task_notes_LLM = list()
+    task_notes = args.task_notes
+    for _task in task_notes:
+        for _note in task_notes[_task]:
+            task_notes_LLM.append({"phases": [_task.replace("-", " ")], "note": _note})
+
+    if args.language != "English":
+        task_notes_LLM.append(
+            {"phases": ["literature review", "plan formulation", "data preparation", "running experiments", "results interpretation", "report writing", "report refinement"],
+            "note": f"You should always write in the following language to converse and to write the report {args.language}"},
+        )
+
+    human_in_loop = {
+        "literature review":      human_mode,
+        "plan formulation":       human_mode,
+        "data preparation":       human_mode,
+        "running experiments":    human_mode,
+        "results interpretation": human_mode,
+        "report writing":         human_mode,
+        "report refinement":      human_mode,
+    }
+
+    agent_models = {
+        "literature review":      llm_backend,
+        "plan formulation":       llm_backend,
+        "data preparation":       llm_backend,
+        "running experiments":    llm_backend,
+        "report writing":         llm_backend,
+        "results interpretation": llm_backend,
+        "paper refinement":       llm_backend,
+    }
+    if parallel_labs:
+        remove_figures()
+        GLOBAL_AGENTRXIV = AgentRxiv()
+        remove_directory(f"{RESEARCH_DIR_PATH}")
+        os.mkdir(os.path.join(".", f"{RESEARCH_DIR_PATH}"))
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        if not compile_pdf: raise Exception("PDF compilation must be used with agentRxiv!")
+        def run_lab(parallel_lab_index):
+            time_str = str()
+            time_now = time.time()
+            for _paper_index in range(num_papers_to_write):
+                lab_dir = os.path.join(RESEARCH_DIR_PATH, f"research_dir_lab{parallel_lab_index}_paper{_paper_index}")
+                os.mkdir(lab_dir)
+                os.mkdir(os.path.join(lab_dir, "src"))
+                os.mkdir(os.path.join(lab_dir, "tex"))
+                lab_instance = LaboratoryWorkflow(
+                    parallelized=True,
+                    research_topic=research_topic,
+                    notes=task_notes_LLM,
+                    agent_model_backbone=agent_models,
+                    human_in_loop_flag=human_in_loop,
+                    openai_api_key=api_key,
+                    compile_pdf=compile_pdf,
+                    num_papers_lit_review=num_papers_lit_review,
+                    papersolver_max_steps=papersolver_max_steps,
+                    mlesolver_max_steps=mlesolver_max_steps,
+                    paper_index=_paper_index,
+                    lab_index=parallel_lab_index,
+                    except_if_fail=except_if_fail,
+                    lab_dir=lab_dir,
+                    agentRxiv=True,
+                    agentrxiv_papers=args.agentrxiv_papers
+                )
+                lab_instance.perform_research()
+                time_str += str(time.time() - time_now) + " | "
+                with open(f"agent_times_{parallel_lab_index}.txt", "w") as f:
+                    f.write(time_str)
+                time_now = time.time()
+
+        with ThreadPoolExecutor(max_workers=num_parallel_labs) as executor:
+            futures = [executor.submit(run_lab, lab_idx) for lab_idx in range(num_parallel_labs)]
+            for future in as_completed(futures):
+                try: future.result()
+                except Exception as e: print(f"Error in lab: {e}")
+
+        raise NotImplementedError("Todo: implement parallel labs")
+    else:
+        # remove previous files
+        remove_figures()
+        if agentRxiv: GLOBAL_AGENTRXIV = AgentRxiv(lab_index)
+        if not agentRxiv:
+            remove_directory(f"{RESEARCH_DIR_PATH}")
+            os.mkdir(os.path.join(".", f"{RESEARCH_DIR_PATH}"))
+        # make src and research directory
+        if not os.path.exists("state_saves"): os.mkdir(os.path.join(".", "state_saves"))
+        time_str = str()
+        time_now = time.time()
+        for _paper_index in range(num_papers_to_write):
+            lab_direct = f"{RESEARCH_DIR_PATH}/research_dir_{_paper_index}_lab_{lab_index}"
+            os.mkdir(os.path.join(".", lab_direct))
+            os.mkdir(os.path.join(f"./{lab_direct}", "src"))
+            os.mkdir(os.path.join(f"./{lab_direct}", "tex"))
+            lab = LaboratoryWorkflow(
+                research_topic=research_topic,
+                notes=task_notes_LLM,
+                agent_model_backbone=agent_models,
+                human_in_loop_flag=human_in_loop,
+                openai_api_key=api_key,
+                compile_pdf=compile_pdf,
+                num_papers_lit_review=num_papers_lit_review,
+                papersolver_max_steps=papersolver_max_steps,
+                mlesolver_max_steps=mlesolver_max_steps,
+                paper_index=_paper_index,
+                except_if_fail=except_if_fail,
+                agentRxiv=False,
+                lab_index=lab_index,
+                lab_dir=f"./{lab_direct}"
+            )
+            lab.perform_research()
+            time_str += str(time.time() - time_now) + " | "
+            with open(f"agent_times_{lab_index}.txt", "w") as f:
+                f.write(time_str)
+            time_now = time.time()
+
+
+
+
+
+
+
+"""
+@@@@@@@@@@@@@@@ CHECKLIST @@@@@@@@@@@@@@@ 
+Practical:
+----------
+- Make a better config system (YAML?)
+
+Advancements:
+-------------
+- Make the ability to have agents build on top of their own research
+- Run agent labs in parallel (asynch) 
+
+"""
+
+
+
+
+
+
+
+
+
+
+================================================
+FILE: app.py
+================================================
+import random, time
+
+from flask import Flask, render_template, request, redirect, url_for, flash, send_from_directory, jsonify
+from werkzeug.utils import secure_filename
+import os
+from PyPDF2 import PdfReader
+from flask_sqlalchemy import SQLAlchemy
+from sentence_transformers import SentenceTransformer
+from sklearn.metrics.pairwise import cosine_similarity
+import numpy as np
+
+app = Flask(__name__)
+app.config['SECRET_KEY'] = 'your-secret-key'
+app.config['UPLOAD_FOLDER'] = 'uploads/'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///papers.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+db = SQLAlchemy(app)
+
+class Paper(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    filename = db.Column(db.String(120), nullable=False)
+    text = db.Column(db.Text, nullable=True)
+
+def update_papers_from_uploads():
+    for _tries in range(5):
+        try:
+            uploads_dir = app.config['UPLOAD_FOLDER']
+            file_list = os.listdir(uploads_dir)
+            print("Files in uploads folder:", file_list)
+            for filename in file_list:
+                if filename.lower().endswith('.pdf'):
+                    # Check if file is already in the DB
+                    if not Paper.query.filter_by(filename=filename).first():
+                        print("Processing file:", filename)
+                        file_path = os.path.join(uploads_dir, filename)
+                        extracted_text = ""
+                        try:
+                            reader = PdfReader(file_path)
+                            for page in reader.pages:
+                                text = page.extract_text()
+                                if text:
+                                    extracted_text += text
+                        except Exception as e:
+                            flash(f'Error processing {filename}: {e}')
+                            continue
+                        if not extracted_text.strip():
+                            print(f"Warning: No text extracted from {filename}")
+                        else:
+                            print(f"Extracted {len(extracted_text)} characters from {filename}")
+                        new_paper = Paper(filename=filename, text=extracted_text)
+                        db.session.add(new_paper)
+            db.session.commit()
+            return
+        except Exception as e:
+            print("WEB SERVER LOAD EXCEPTION", e, str(e))
+            time.sleep(random.randint(5, 15))
+    return
+    #raise Exception("FAILED TO UPDATE")
+
+# Load a pre-trained sentence transformer model
+model = SentenceTransformer('all-MiniLM-L6-v2')
+
+@app.route('/update', methods=['GET'])
+def update_on_demand():
+    update_papers_from_uploads()
+    return jsonify({"message": "Uploads folder processed successfully."})
+
+@app.route('/')
+def index():
+    update_papers_from_uploads()
+    papers = Paper.query.all()
+    return render_template('index.html', papers=papers)
+
+@app.route('/upload', methods=['GET', 'POST'])
+def upload():
+    if request.method == 'POST':
+        if 'pdf' not in request.files:
+            flash('No file part')
+            return redirect(request.url)
+        file = request.files['pdf']
+        if file.filename == '':
+            flash('No selected file')
+            return redirect(request.url)
+        if file:
+            filename = secure_filename(file.filename)
+            file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            file.save(file_path)
+            extracted_text = ""
+            try:
+                reader = PdfReader(file_path)
+                for page in reader.pages:
+                    text = page.extract_text()
+                    if text:
+                        extracted_text += text
+            except Exception as e:
+                flash(f'Error processing PDF: {e}')
+            new_paper = Paper(filename=filename, text=extracted_text)
+            db.session.add(new_paper)
+            db.session.commit()
+            flash('File uploaded and processed successfully!')
+            return redirect(url_for('index'))
+    return render_template('upload.html')
+
+@app.route('/search')
+def search():
+    query = request.args.get('q', '')
+    if query:
+        papers = Paper.query.all()
+        query_embedding = model.encode([query])
+        paper_texts = [paper.text for paper in papers if paper.text]
+        if not paper_texts:
+            return render_template('search.html', papers=[], query=query)
+        paper_embeddings = model.encode(paper_texts)
+        similarities = cosine_similarity(query_embedding, paper_embeddings)[0]
+        papers_with_scores = list(zip([p for p in papers if p.text], similarities))
+        papers_sorted = sorted(papers_with_scores, key=lambda x: x[1], reverse=True)
+        return render_template('search.html', papers=papers_sorted, query=query)
+    return render_template('search.html', papers=[], query=query)
+
+@app.route('/api/search')
+def api_search():
+    query = request.args.get('q', '')
+    if not query:
+        return jsonify({'error': 'No query provided'}), 400
+    papers = Paper.query.all()
+    if not papers:
+        return jsonify({'query': query, 'results': []})
+    query_embedding = model.encode([query])
+    paper_texts = [paper.text for paper in papers if paper.text]
+    if not paper_texts:
+        return jsonify({'query': query, 'results': []})
+    paper_embeddings = model.encode(paper_texts)
+    similarities = cosine_similarity(query_embedding, paper_embeddings)[0]
+    papers_with_scores = list(zip([p for p in papers if p.text], similarities))
+    papers_sorted = sorted(papers_with_scores, key=lambda x: x[1], reverse=True)
+    results = []
+    for paper, score in papers_sorted:
+        pdf_url = url_for('uploaded_file', filename=paper.filename, _external=True)
+        results.append({
+            'id': paper.id,
+            'filename': paper.filename,
+            'similarity': float(score),
+            'pdf_url': pdf_url
+        })
+    return jsonify({'query': query, 'results': results})
+
+@app.route('/uploads/<path:filename>')
+def uploaded_file(filename):
+    return send_from_directory(app.config['UPLOAD_FOLDER'], filename, mimetype='application/pdf')
+
+@app.route('/view/<int:paper_id>')
+def view_pdf(paper_id):
+    paper = Paper.query.get_or_404(paper_id)
+    pdf_url = url_for('uploaded_file', filename=paper.filename, _external=True)
+    return render_template('view.html', paper=paper, pdf_url=pdf_url)
+
+
+def run_app(port=5000):
+    # Reset the database by removing the existing file
+    db_path = "papers.db"
+    if os.path.exists("instance/" + db_path):
+        os.remove("instance/" + db_path)
+    with app.app_context():
+        db.create_all()
+    if not os.path.exists(app.config['UPLOAD_FOLDER']):
+        os.makedirs(app.config['UPLOAD_FOLDER'])
+    app.run(debug=False, port=port)
+
+if __name__ == '__main__':
+    run_app()
+
+
+================================================
+FILE: common_imports.py
+================================================
+# General-purpose imports
+import os
+import sys
+import json
+import time
+import re
+import math
+import logging
+import random
+import shutil
+import pathlib
+import argparse
+import itertools
+import datetime
+import collections
+import subprocess
+
+# Data manipulation and analysis
+import pandas as pd
+import numpy as np
+import csv
+import json
+import yaml
+import h5py
+import sqlite3
+import pickle
+
+# Visualization
+import matplotlib.pyplot as plt
+import seaborn as sns
+import plotly.express as px
+import plotly.graph_objects as go
+
+# Hugging Face & Transformers
+import transformers
+
+# Deep learning frameworks
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import torch.nn.functional as F
+from torch.utils.data import DataLoader, Dataset, random_split
+import tensorflow as tf
+#import keras
+
+# NLP Libraries
+import tiktoken
+import nltk
+from nltk.tokenize import word_tokenize, sent_tokenize
+from nltk.corpus import stopwords
+from nltk.stem import PorterStemmer, WordNetLemmatizer
+import spacy
+import sacremoses
+# Diffusers for image generation and stable diffusion
+import diffusers
+from diffusers import StableDiffusionPipeline, DPMSolverMultistepScheduler
+
+# Performance acceleration libraries
+import accelerate
+from accelerate import Accelerator
+
+# Hugging Face Hub utilities
+import huggingface_hub
+from huggingface_hub import HfApi, notebook_login
+
+# Scikit-learn for machine learning
+import sklearn
+from sklearn.model_selection import train_test_split, GridSearchCV, RandomizedSearchCV
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, classification_report, confusion_matrix
+from sklearn.preprocessing import StandardScaler, MinMaxScaler, LabelEncoder
+from sklearn.decomposition import PCA
+from sklearn.cluster import KMeans
+from sklearn.svm import SVC
+from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
+from sklearn.metrics.pairwise import linear_kernel, cosine_similarity
+
+# Statistical analysis
+import scipy
+from scipy import stats, signal, spatial
+from scipy.optimize import minimize
+from scipy.spatial.distance import euclidean, cosine
+from scipy.linalg import svd, eig
+from statsmodels.api import OLS, Logit
+from statsmodels.tsa.arima_model import ARIMA
+from statsmodels.tsa.stattools import adfuller, pacf, acf
+
+# Image processing and handling
+from PIL import Image
+import imageio
+from skimage import io, color, filters, transform, exposure
+
+# File handling and I/O
+import gzip
+import zipfile
+import tarfile
+import glob
+
+# Parallel processing
+import multiprocessing
+from multiprocessing import Pool
+
+# Miscellaneous utilities
+import hashlib
+import uuid
+import base64
+import warnings
+from tqdm import tqdm
+from functools import partial, lru_cache
+
+# Other advanced libraries
+import pydantic
+import requests
+import aiohttp
+
+
+
+================================================
+FILE: inference.py
+================================================
+import openai
+import time, tiktoken
+from openai import OpenAI
+import os, anthropic, json
+import google.generativeai as genai
+
+TOKENS_IN = dict()
+TOKENS_OUT = dict()
+
+encoding = tiktoken.get_encoding("cl100k_base")
+
+def curr_cost_est():
+    costmap_in = {
+        "gpt-4o": 2.50 / 1000000,
+        "gpt-4o-mini": 0.150 / 1000000,
+        "o1-preview": 15.00 / 1000000,
+        "o1-mini": 3.00 / 1000000,
+        "claude-3-5-sonnet": 3.00 / 1000000,
+        "deepseek-chat": 1.00 / 1000000,
+        "o1": 15.00 / 1000000,
+        "o3-mini": 1.10 / 1000000,
+    }
+    costmap_out = {
+        "gpt-4o": 10.00/ 1000000,
+        "gpt-4o-mini": 0.6 / 1000000,
+        "o1-preview": 60.00 / 1000000,
+        "o1-mini": 12.00 / 1000000,
+        "claude-3-5-sonnet": 12.00 / 1000000,
+        "deepseek-chat": 5.00 / 1000000,
+        "o1": 60.00 / 1000000,
+        "o3-mini": 4.40 / 1000000,
+    }
+    return sum([costmap_in[_]*TOKENS_IN[_] for _ in TOKENS_IN]) + sum([costmap_out[_]*TOKENS_OUT[_] for _ in TOKENS_OUT])
+
+def query_model(model_str, prompt, system_prompt, openai_api_key=None, gemini_api_key=None,  anthropic_api_key=None, tries=5, timeout=5.0, temp=None, print_cost=True, version="1.5"):
+    preloaded_api = os.getenv('OPENAI_API_KEY')
+    if openai_api_key is None and preloaded_api is not None:
+        openai_api_key = preloaded_api
+    if openai_api_key is None and anthropic_api_key is None:
+        raise Exception("No API key provided in query_model function")
+    if openai_api_key is not None:
+        openai.api_key = openai_api_key
+        os.environ["OPENAI_API_KEY"] = openai_api_key
+    if anthropic_api_key is not None:
+        os.environ["ANTHROPIC_API_KEY"] = anthropic_api_key
+    if gemini_api_key is not None:
+        os.environ["GEMINI_API_KEY"] = gemini_api_key
+    for _ in range(tries):
+        try:
+            if model_str == "gpt-4o-mini" or model_str == "gpt4omini" or model_str == "gpt-4omini" or model_str == "gpt4o-mini":
+                model_str = "gpt-4o-mini"
+                messages = [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt}]
+                if version == "0.28":
+                    if temp is None:
+                        completion = openai.ChatCompletion.create(
+                            model=f"{model_str}",  # engine = "deployment_name".
+                            messages=messages
+                        )
+                    else:
+                        completion = openai.ChatCompletion.create(
+                            model=f"{model_str}",  # engine = "deployment_name".
+                            messages=messages, temperature=temp
+                        )
+                else:
+                    client = OpenAI()
+                    if temp is None:
+                        completion = client.chat.completions.create(
+                            model="gpt-4o-mini-2024-07-18", messages=messages, )
+                    else:
+                        completion = client.chat.completions.create(
+                            model="gpt-4o-mini-2024-07-18", messages=messages, temperature=temp)
+                answer = completion.choices[0].message.content
+
+            elif model_str == "gemini-2.0-pro":
+                genai.configure(api_key=gemini_api_key)
+                model = genai.GenerativeModel(model_name="gemini-2.0-pro-exp-02-05", system_instruction=system_prompt)
+                answer = model.generate_content(prompt).text
+            elif model_str == "gemini-1.5-pro":
+                genai.configure(api_key=gemini_api_key)
+                model = genai.GenerativeModel(model_name="gemini-1.5-pro", system_instruction=system_prompt)
+                answer = model.generate_content(prompt).text
+            elif model_str == "o3-mini":
+                model_str = "o3-mini"
+                messages = [
+                    {"role": "user", "content": system_prompt + prompt}]
+                if version == "0.28":
+                    completion = openai.ChatCompletion.create(
+                        model=f"{model_str}",  messages=messages)
+                else:
+                    client = OpenAI()
+                    completion = client.chat.completions.create(
+                        model="o3-mini-2025-01-31", messages=messages)
+                answer = completion.choices[0].message.content
+
+            elif model_str == "claude-3.5-sonnet":
+                client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+                message = client.messages.create(
+                    model="claude-3-5-sonnet-latest",
+                    system=system_prompt,
+                    messages=[{"role": "user", "content": prompt}])
+                answer = json.loads(message.to_json())["content"][0]["text"]
+            elif model_str == "gpt4o" or model_str == "gpt-4o":
+                model_str = "gpt-4o"
+                messages = [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt}]
+                if version == "0.28":
+                    if temp is None:
+                        completion = openai.ChatCompletion.create(
+                            model=f"{model_str}",  # engine = "deployment_name".
+                            messages=messages
+                        )
+                    else:
+                        completion = openai.ChatCompletion.create(
+                            model=f"{model_str}",  # engine = "deployment_name".
+                            messages=messages, temperature=temp)
+                else:
+                    client = OpenAI()
+                    if temp is None:
+                        completion = client.chat.completions.create(
+                            model="gpt-4o-2024-08-06", messages=messages, )
+                    else:
+                        completion = client.chat.completions.create(
+                            model="gpt-4o-2024-08-06", messages=messages, temperature=temp)
+                answer = completion.choices[0].message.content
+            elif model_str == "deepseek-chat":
+                model_str = "deepseek-chat"
+                messages = [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt}]
+                if version == "0.28":
+                    raise Exception("Please upgrade your OpenAI version to use DeepSeek client")
+                else:
+                    deepseek_client = OpenAI(
+                        api_key=os.getenv('DEEPSEEK_API_KEY'),
+                        base_url="https://api.deepseek.com/v1"
+                    )
+                    if temp is None:
+                        completion = deepseek_client.chat.completions.create(
+                            model="deepseek-chat",
+                            messages=messages)
+                    else:
+                        completion = deepseek_client.chat.completions.create(
+                            model="deepseek-chat",
+                            messages=messages,
+                            temperature=temp)
+                answer = completion.choices[0].message.content
+            elif model_str == "o1-mini":
+                model_str = "o1-mini"
+                messages = [
+                    {"role": "user", "content": system_prompt + prompt}]
+                if version == "0.28":
+                    completion = openai.ChatCompletion.create(
+                        model=f"{model_str}",  # engine = "deployment_name".
+                        messages=messages)
+                else:
+                    client = OpenAI()
+                    completion = client.chat.completions.create(
+                        model="o1-mini-2024-09-12", messages=messages)
+                answer = completion.choices[0].message.content
+            elif model_str == "o1":
+                model_str = "o1"
+                messages = [
+                    {"role": "user", "content": system_prompt + prompt}]
+                if version == "0.28":
+                    completion = openai.ChatCompletion.create(
+                        model="o1-2024-12-17",  # engine = "deployment_name".
+                        messages=messages)
+                else:
+                    client = OpenAI()
+                    completion = client.chat.completions.create(
+                        model="o1-2024-12-17", messages=messages)
+                answer = completion.choices[0].message.content
+            elif model_str == "o1-preview":
+                model_str = "o1-preview"
+                messages = [
+                    {"role": "user", "content": system_prompt + prompt}]
+                if version == "0.28":
+                    completion = openai.ChatCompletion.create(
+                        model=f"{model_str}",  # engine = "deployment_name".
+                        messages=messages)
+                else:
+                    client = OpenAI()
+                    completion = client.chat.completions.create(
+                        model="o1-preview", messages=messages)
+                answer = completion.choices[0].message.content
+
+            try:
+                if model_str in ["o1-preview", "o1-mini", "claude-3.5-sonnet", "o1", "o3-mini"]:
+                    encoding = tiktoken.encoding_for_model("gpt-4o")
+                elif model_str in ["deepseek-chat"]:
+                    encoding = tiktoken.encoding_for_model("cl100k_base")
+                else:
+                    encoding = tiktoken.encoding_for_model(model_str)
+                if model_str not in TOKENS_IN:
+                    TOKENS_IN[model_str] = 0
+                    TOKENS_OUT[model_str] = 0
+                TOKENS_IN[model_str] += len(encoding.encode(system_prompt + prompt))
+                TOKENS_OUT[model_str] += len(encoding.encode(answer))
+                if print_cost:
+                    print(f"Current experiment cost = ${curr_cost_est()}, ** Approximate values, may not reflect true cost")
+            except Exception as e:
+                if print_cost: print(f"Cost approximation has an error? {e}")
+            return answer
+        except Exception as e:
+            print("Inference Exception:", e)
+            time.sleep(timeout)
+            continue
+    raise Exception("Max retries: timeout")
+
+
+#print(query_model(model_str="o1-mini", prompt="hi", system_prompt="hey"))
+
+
+================================================
+FILE: LICENSE
+================================================
+MIT License
+
+Copyright (c) 2025 Samuel Schmidgall
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+================================================
+FILE: mlesolver.py
+================================================
+import random
+from copy import copy
+from copy import deepcopy
+from common_imports import *
+from abc import abstractmethod
+
+
+from tools import *
+from inference import *
+from pathlib import Path
+
+
+from contextlib import contextmanager
+import sys, os
+
+
+os.environ["JOBLIB_VERBOSITY"] = "0"
+logging.basicConfig(level=logging.WARNING)
+warnings.filterwarnings("ignore")
+warnings.simplefilter(action='ignore', category=FutureWarning)
+import logging
+logging.getLogger('sklearn.model_selection').setLevel(logging.WARNING)
+
+
+GLOBAL_REPAIR_ATTEMPTS = 2
+
+
+class Command:
+    def __init__(self):
+        self.cmd_type = "OTHER"
+
+    @abstractmethod
+    def docstring(self) -> str:
+        pass
+
+    @abstractmethod
+    def execute_command(self, *args) -> str:
+        pass
+
+    @abstractmethod
+    def matches_command(self, cmd_str) -> bool:
+        pass
+
+    @abstractmethod
+    def parse_command(self, cmd_str) -> tuple:
+        pass
+
+
+"""
+@@@@@@@@@@@@@@@@@@
+@@ CODING TOOLS @@
+@@@@@@@@@@@@@@@@@@
+"""
+
+class Replace(Command):
+    def __init__(self):
+        super().__init__()
+        self.cmd_type = "CODE-replace"
+
+    def docstring(self) -> str:
+        return (
+            "============= REWRITE CODE EDITING TOOL =============\n"
+            "You also have access to a code replacing tool. \n"
+            "This tool allows you to entirely re-write/replace all of the current code and erase all existing code.\n"
+            "You can use this tool via the following command: ```REPLACE\n<code here>\n```, where REPLACE is the word REPLACE and <code here> will be the new code that is replacing the entire set of old code. This tool is useful if you want to make very significant changes, such as entirely changing the model, or the learning process. Before changing the existing code to be your new code, your new code will be tested and if it returns an error it will not replace the existing code. Try limiting the use of rewriting and aim for editing the code more."
+        )
+
+    def execute_command(self, *args) -> str:
+        # args[0] -> new code
+        args = args[0]
+        return args[0]
+
+    def matches_command(self, cmd_str) -> bool:
+        if "```REPLACE" in cmd_str: return True
+        return False
+
+    def parse_command(self, *args) -> tuple:
+        new_code = extract_prompt(args[0], "REPLACE")
+        code_exec = f"{args[1]}\n{new_code}"
+        code_ret = execute_code(code_exec)
+        if "[CODE EXECUTION ERROR]" in code_ret: return False, (None, code_ret,)
+        return True, (new_code.split("\n"), code_ret)
+
+
+
+class Edit(Command):
+    def __init__(self):
+        super().__init__()
+        self.cmd_type = "CODE-edit"
+
+    def docstring(self) -> str:
+        return (
+            "============= CODE EDITING TOOL =============\n"
+            "You also have access to a code editing tool. \n"
+            "This tool allows you to replace lines indexed n through m (n:m) of the current code with as many lines of new code as you want to add. This removal is inclusive meaning that line n and m and everything between n and m is removed. This will be the primary way that you interact with code. \n"
+            "You can edit code using the following command: ```EDIT N M\n<new lines to replace old lines>\n``` EDIT is the word EDIT, N is the first line index you want to replace and M the the last line index you want to replace (everything inbetween will also be removed), and <new lines to replace old lines> will be the new code that is replacing the old code. Before changing the existing code to be your new code, your new code will be tested and if it returns an error it will not replace the existing code. Your changes should significantly change the functionality of the code."
+        )
+
+    def execute_command(self, *args) -> str:
+        # args[0] -> N (int)
+        # args[1] -> M (int)
+        # args[2] -> old code
+        # args[3] -> new lines to replace
+        # args[4] -> new lines to replace
+        try:
+            args = args[0]
+            current_code = args[2]
+            lines_to_add = list(reversed(args[3]))
+            lines_to_replace = list(reversed(range(args[0], args[1]+1)))
+            for _ln in lines_to_replace:
+                current_code.pop(_ln)
+            for _line in lines_to_add:
+                current_code.insert(args[0], _line)
+            new_code = "\n".join(current_code)
+            code_exec = f"{args[4]}\n{new_code}"
+            code_ret = execute_code(code_exec)
+            if "CODE EXECUTION ERROR" in code_ret: return (False, None, code_ret)
+            return (True, current_code, code_ret)
+        except Exception as e:
+            return (False, None, str(e))
+
+    def matches_command(self, cmd_str) -> bool:
+        if "```EDIT" in cmd_str: return True
+        return False
+
+    def parse_command(self, *args) -> tuple:
+        cmd_str, codelines, datasetcode = args[0], args[1], args[2]
+        success = True
+        try:
+            text = extract_prompt(cmd_str, "EDIT").split("\n")
+            if len(text) == 0: return False, None
+            lines_to_edit = text[0].split(" ")
+            if len(lines_to_edit) != 2: return False, None
+            lines_to_edit = [int(_) for _ in lines_to_edit]
+            if len(text[1:]) == 0: return False, None
+            return success, (lines_to_edit[0], lines_to_edit[1], codelines, text[1:], datasetcode)
+        except Exception as e:
+            return False, (None, None, None, None, None)
+
+
+def get_score(outlined_plan, code, code_return, REWARD_MODEL_LLM, attempts=3, openai_api_key=None):
+    e = str()
+    for _attempt in range(attempts):
+        try:
+            # todo: have a reward function here
+            sys = (
+                f"You are a professor agent who is serving as an expert reward model that can read a research plan, research code, and code output and are able to determine how well a model followed the plan, built the code, and got the proper output scored from 0 to 1 as a float.\n\n"
+                f"You must structure your score exactly in the following way: ```SCORE\n<score here>\n``` where SCORE is just the word score, <score here> is a floating point number between 0 and 1 representing how well the model followed the plan, built the code, and got the proper output."
+            )
+            scoring = query_model(
+                model_str=f"{REWARD_MODEL_LLM}",
+                system_prompt=sys,
+                openai_api_key=openai_api_key,
+                prompt=(
+                    f"Outlined in the following text is the research plan that the machine learning engineer was tasked with building: {outlined_plan}\n\n"
+                    f"The following text is the research code that the model produced: \n{code}\n\n"
+                    f"The following is the output from the model: {code_return}\n\n"), temp=0.6)
+            performance = extract_prompt(text=scoring, word="SCORE")
+            performance = float(performance)
+            return performance, f"The performance of your submission is: {performance}", True
+        except Exception as e:
+            return None, str(e), False
+    return 0, e
+
+
+def code_repair(code, error, ctype, REPAIR_LLM, openai_api_key=None):
+    if ctype == "replace":
+        repair_sys = (
+            "You are an automated code repair tool.\n"
+            "Your goal is to take in code and an error and repair the code to make sure the same error does not repeat itself, and also to remove any other potential errors from the code without affecting the code output.\n"
+            "Your output should match the original code as closely as possible.\n"
+            "You must wrap the code in the following ```python\n<code here>\n```\n"
+            "Do not forget the opening ```python and the closing ```."
+        )
+        model_resp = query_model(
+            openai_api_key=openai_api_key,
+            model_str=f"{REPAIR_LLM}",
+            system_prompt=repair_sys,
+            prompt=f"Provided here is the error: {error}\n\nProvided below is the code:\n\n{code}", temp=0.8)
+        return extract_prompt(model_resp, "python")
+    elif ctype == "edit":
+        repair_sys = (
+            "You are an automated code repair tool.\n"
+            "Your goal is to take in code and an error and repair the code to make sure the same error does not repeat itself, and also to remove any other potential errors from the code without affecting the code output.\n"
+            "Your output should match the original code as closely as possible.\n"
+            
+            "============= CODE EDITING TOOL =============\n"
+            "You have access to a code editing tool. \n"
+            "This tool allows you to replace lines indexed n through m (n:m) of the current code with as many lines of new code as you want to add. This removal is inclusive meaning that line n and m and everything between n and m is removed. This will be the primary way that you interact with code. \n"
+            "You can edit code using the following command: ```EDIT N M\n<new lines to replace old lines>\n``` EDIT is the word EDIT, N is the first line index you want to replace and M the the last line index you want to replace (everything inbetween will also be removed), and <new lines to replace old lines> will be the new code that is replacing the old code. Before changing the existing code to be your new code, your new code will be tested and if it returns an error it will not replace the existing code.\n"
+            "Please use the code editing tool to fix this code."
+            "Do not forget the opening ```EDIT N M and the closing ```."
+            "Your output should look like the following\n\n```EDIT N M\n<new lines to replace old lines>\n```"
+        )
+        model_resp = query_model(
+            openai_api_key=openai_api_key,
+            model_str=f"{REPAIR_LLM}",
+            system_prompt=repair_sys,
+            prompt=f"Provided here is the error: {error}\n\nProvided below is the code:\n\n{code}", temp=0.2)
+        return model_resp
+
+
+class MLESolver:
+    def __init__(self, dataset_code, openai_api_key=None, notes=None, max_steps=10, insights=None, plan=None, llm_str=None):
+        self.supress_print = False
+        if notes is None: self.notes = []
+        else: self.notes = notes
+        self.dataset_code = dataset_code
+        if plan is None: self.plan = ""
+        else: self.plan = plan
+        self.llm_str = llm_str
+        self.verbose = False
+        self.max_codes = 1
+        self.st_hist_len = 2
+        self.min_gen_trials = 1
+        self.code_lines = str()
+        self.st_history = list()
+        self.insights = insights
+        self.code_reflect = str()
+        self.max_steps = max_steps
+        self.prev_code_ret = str()
+        self.should_execute_code = True
+        self.openai_api_key = openai_api_key
+
+    def initial_solve(self):
+        """
+        Initialize the solver and get an initial set of code and a return
+        @return: None
+        """
+        # @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+        # @@ Initial CodeGen Commands @@
+        # @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+        self.best_score = None
+        self.commands = [Replace()]
+        self.model = f"{self.llm_str}"
+        init_code, init_return, self.best_score = self.gen_initial_code()
+        self.best_codes = [(copy(init_code), self.best_score, init_return) for _ in range(1)]
+
+        self.code_lines = init_code
+        self.model = f"{self.llm_str}"
+        self.commands = [Edit(), Replace()]
+        self.prev_working_code = copy(self.code_lines)
+
+    @staticmethod
+    def clean_text(text):
+        text = text.replace("```\n", "```")
+        text = text.replace("```python\n", "```REPLACE\n")
+        return text
+
+    def gen_initial_code(self):
+        num_attempts = 0
+        error_hist = list()
+        while True:
+            if num_attempts == 0:
+                err = str()
+                err_hist = str()
+            else:
+                err = f"The following was the previous command generated: {model_resp}. This was the error return {cmd_str}. You should make sure not to repeat this error and to solve the presented problem."
+                error_hist.append(err)
+                if len(error_hist) == 5: _ = error_hist.pop(0)
+                err = "\n".join(error_hist)
+                err_hist = "The following is a history of your previous errors\n" + err + "\nDO NOT REPEAT THESE."
+            model_resp = query_model(
+                openai_api_key=self.openai_api_key,
+                model_str=self.model,
+                system_prompt=self.system_prompt(),
+                prompt=f"{err_hist}\nYou should now use ```REPLACE to create initial code to solve the challenge. Now please enter the ```REPLACE command below:\n ", temp=1.0)
+            model_resp = self.clean_text(model_resp)
+            cmd_str, code_lines, prev_code_ret, should_execute_code, score = self.process_command(model_resp)
+            if not self.supress_print: print(f"@@@ INIT ATTEMPT: Command Exec // Attempt {num_attempts}: ", str(cmd_str).replace("\n", " | "))
+            if not self.supress_print: print(f"$$$ Score: {score}")
+            if score is not None: break
+            num_attempts += 1
+        return code_lines, prev_code_ret, score
+
+    def solve(self):
+        num_attempts = 0
+        best_pkg = None
+        top_score = None
+        self.prev_code_ret = None
+        self.should_execute_code = False
+        while True:
+            if len(self.commands) == 2: cmd_app_str = "You must output either the ```EDIT or ```REPLACE command immediately. "
+            else: cmd_app_str = ""
+            model_resp = query_model(
+                openai_api_key=self.openai_api_key,
+                model_str=self.model,
+                system_prompt=self.system_prompt(),
+                prompt=f"The following is your history:{self.history_str()}\n\n{cmd_app_str}Now please enter a command: ", temp=1.0)
+            model_resp = self.clean_text(model_resp)
+            self.code_lines = copy(random.choice(self.best_codes)[0])
+            cmd_str, code_lines, prev_code_ret, should_execute_code, score = self.process_command(model_resp)
+            self.st_history.append([model_resp, prev_code_ret, code_lines, cmd_str])
+            if len(self.st_history) > self.st_hist_len: self.st_history.pop(0)
+            if score is not None:
+                if top_score is None:
+                    best_pkg = copy(code_lines), copy(prev_code_ret), copy(should_execute_code), copy(model_resp), copy(cmd_str)
+                    top_score = score
+                elif score > top_score:
+                    best_pkg = copy(code_lines), copy(prev_code_ret), copy(should_execute_code), copy(model_resp), copy(cmd_str)
+                    top_score = score
+            if not self.supress_print: print(f"@@@ Command Exec // Attempt {num_attempts}: ", str(cmd_str).replace("\n", " | "))
+            if not self.supress_print: print(f"$$$ Score: {score}")
+            if num_attempts >= self.min_gen_trials and top_score is not None: break
+            num_attempts += 1
+        self.code_lines, self.prev_code_ret, self.should_execute_code, model_resp, cmd_str = best_pkg
+        if not self.supress_print: print(prev_code_ret)
+        # add top scoring code that was successful to the best codes
+        if top_score > self.best_codes[-1][1]:
+            # replace the lowest scoring one
+            if len(self.best_codes) >= self.max_codes:
+                self.best_codes.pop(-1)
+                self.code_reflect = self.reflect_code()
+            self.best_codes.append((copy(self.code_lines), copy(top_score), self.prev_code_ret))
+            # sort by score, to make sure lowest are removed in future
+            self.best_codes.sort(key=lambda x: x[1], reverse=True)
+        return model_resp, cmd_str
+
+    def reflect_code(self):
+        """
+        Provide a reflection on produced behavior for next execution
+        @return: (str) language model-produced reflection
+        """
+        code_strs = ("$"*40 + "\n\n").join([self.generate_code_lines(_code[0]) + f"\nCode Return {_code[1]}" for _code in self.best_codes])
+        code_strs = f"Please reflect on the following sets of code: {code_strs} and come up with generalizable insights that will help you improve your performance on this benchmark."
+        syst = self.system_prompt(commands=False) + code_strs
+        return query_model(prompt="Please reflect on ideas for how to improve your current code. Examine the provided code and think very specifically (with precise ideas) on how to improve performance, which methods to use, how to improve generalization on the test set with line-by-line examples below:\n", system_prompt=syst, model_str=f"{self.llm_str}", openai_api_key=self.openai_api_key)
+
+    def process_command(self, model_resp):
+        """
+        Take command from language model and execute if valid
+        @param model_resp: (str) language model output
+        @return: (tuple) tuple containing the following items
+            - cmd_str: (str) code execution return and success flag
+            - code_lines: (list) list of code lines as strings
+            - prev_code_ret: (str) output from running code
+            - should_execute_code: (bool) did the code change, if so we need to re-execute it
+            - score: (float) score of model
+        """
+        prev_code_ret = self.prev_code_ret
+        should_execute_code = self.should_execute_code
+        code_lines = copy(self.code_lines)
+        remove_figures()
+        for cmd in self.commands:
+            if cmd.matches_command(model_resp):
+                # attempt to execute the code edit command
+                if cmd.cmd_type == "CODE-edit":
+                    score = None
+                    failed = True
+                    code_err = str()
+                    for _tries in range(GLOBAL_REPAIR_ATTEMPTS):
+                        success, args = cmd.parse_command(model_resp, copy(self.code_lines), self.dataset_code)
+                        if success:
+                            cmd_return = cmd.execute_command(args)
+                            code_err = f"Return from executing code: {cmd_return[2]}"
+                            if cmd_return[0]:  # if success
+                                code_lines = copy(cmd_return[1])
+                                score, cmd_str, is_valid = get_score(self.plan, "\n".join(code_lines), cmd_return[2], openai_api_key=self.openai_api_key, REWARD_MODEL_LLM=self.llm_str)
+                                if is_valid:
+                                    failed = False
+                                    break
+                                code_err += f"\nReturn from executing code on real test set {cmd_str}"
+                        repaired_code = code_repair(model_resp, code_err, REPAIR_LLM=self.llm_str, ctype="edit", openai_api_key=self.openai_api_key)
+                        model_resp = repaired_code
+                        if not self.supress_print: print(f"     * Attempting repair // try {_tries}*")
+                    if failed:
+                        cmd_str = f"Code editing FAILED due to the following error: {code_err}. Code was reverted back to original state before edits."
+                        if not self.supress_print: print("$$$$ CODE EDIT (failed)")
+                    else:
+                        cmd_str = "Code was successfully edited."
+                        prev_code_ret = copy(cmd_return[2])
+                        if not self.supress_print: print("$$$$ CODE EDIT (success)")
+                        should_execute_code = True
+                    return cmd_str, code_lines, prev_code_ret, should_execute_code, score
+                # attempt to execute the code replace command
+                elif cmd.cmd_type == "CODE-replace": # DONE
+                    score = None
+                    failed = True
+                    code_err = str()
+                    for _tries in range(GLOBAL_REPAIR_ATTEMPTS):
+                        success, args = cmd.parse_command(model_resp, self.dataset_code)
+                        code_err = f"Return from executing code: {args[1]}"
+                        if success:
+                            code_lines = copy(args[0])
+                            score, cmd_str, is_valid = get_score(self.plan, "\n".join(code_lines), args[1], openai_api_key=self.openai_api_key, REWARD_MODEL_LLM=self.llm_str)
+                            if is_valid:
+                                failed = False
+                                break
+                            code_err += f"\nReturn from executing code on real test set {cmd_str}"
+                        repaired_code = code_repair(extract_prompt(model_resp, "REPLACE", ), code_err, ctype="replace", openai_api_key=self.openai_api_key, REPAIR_LLM=self.llm_str)
+                        repaired_code = f"```REPLACE\n{repaired_code}\n```"
+                        model_resp = repaired_code
+                        if not self.supress_print: print(f"     * Attempting repair // try {_tries}*")
+                    if failed:
+                        cmd_str = f"Code replacement FAILED due to the following error: {code_err}.  Code was reverted back to original state before edits."
+                        if not self.supress_print: print("$$$$ CODE REPLACE (failed)")
+                    else:
+                        cmd_str = "Code was successfully replaced."
+                        code_lines = copy(args[0])
+                        prev_code_ret = copy(args[1])
+                        if not self.supress_print: print("$$$$ CODE REPLACE (success)")
+                        should_execute_code = True
+                    return cmd_str, code_lines, prev_code_ret, should_execute_code, score
+        if not self.supress_print: print("$$$$ INVALID COMMAND (failed)")
+        return "Command not supported, choose from existing commands", None, None, None, None
+
+    def history_str(self):
+        """
+        Well-formatted history string
+        @return: (str) history string
+        """
+        hist_str = ""
+        for _hist in range(len(self.st_history)):
+            hist_str += f"-------- History ({len(self.st_history)-_hist} steps ago) -----\n"
+            hist_str += f"Because of the following response: {self.st_history[_hist][0]}\n" if len(self.st_history[_hist][0]) > 0 else ""
+            hist_str += f"and the following COMMAND response output: {self.st_history[_hist][3]}\n"
+            hist_str += f"With the following code used: {'#'*20}\n{self.st_history[_hist][2]}\n{'#'*20}\n\n"
+            hist_str += f"The environment feedback and reflection was as follows: {self.st_history[_hist][1]}\n"
+            hist_str += f"-------- End of history ({len(self.st_history)-_hist} steps ago) -------\n"
+        return hist_str
+
+    def system_prompt(self, commands=True):
+        """
+        Produce a system prompt for the mle-solver to solve ml problems
+        @param commands: (bool) whether to use command prompt
+        @return: (str) system prompt
+        """
+        return (
+            # ROLE DESCRIPTION
+            f"{self.role_description()}.\n"
+            # TASK INSTRUCTIONS
+            f"The following are your task instructions: {self.phase_prompt()}\n"
+            # LIT REVIEW INSIGHTS
+            f"Provided below are some insights from a literature review summary:\n{self.insights}\n"
+            # CODE INSIGHTS
+            f"{self.code_reflect}"
+            # NOTES
+            f"The following are notes, instructions, and general tips for you: {self.notes}"
+            # PLAN DESCRIPTION
+            f"You are given a machine learning research task described, where the plan is described as follows: {self.plan}\n"
+            # DATASET DESCRIPTION            
+            f"{self.generate_dataset_descr_prompt()}"
+            # Create Figures
+            f"You should also try generating at least two figures to showcase the results, titled Figure_1.png and Figure_2.png\n"
+            f"Your method MUST not get 0% accuracy. If it does, you have done something wrong and must correct this. Make sure to check your accuracy calculation is correct.\n"
+            # transition
+            f"Your goal is to solve the research plan as well as possible. You will receive a score after you write the code and should aim to maximize the score by following the plan instructions and writing high quality code.\n"
+            f"Before each experiment please include a print statement explaining exactly what the results are meant to show in great detail before printing the results out.\n"
+            # COMMAND SET
+            f"The following are commands you have access to: {self.command_descriptions()}\n. You should try to have a diversity of command responses if appropriate. Do not repeat the same commend too many times. Please consider looking through your history and not repeating commands too many times." if commands else ""
+        )
+
+    def generate_code_lines(self, code):
+        """
+        Generate well-formatted code lines with line numbers
+        @param code: (list) list of code line strings
+        @return: (str) code lines formatted with line numbers
+        """
+        codestr = str()
+        for _index in range(len(code)):
+            codestr += f"{_index} |{code[_index]}\n"
+        return codestr
+
+    def feedback(self, code_return):
+        """
+        Provide execution feedback after command is run
+        @param code_return: (str) return from code execution
+        @return: (str) feedback string
+        """
+        if code_return is not None:
+            code_str = self.generate_code_lines(self.code_lines)
+            if "[CODE EXECUTION ERROR]" in code_return:
+                if not self.supress_print: print(f"@@@@ ERROR")  # , {code_return.replace('\n', '')}")
+                reflect_prompt = f"This is your code: {code_str}\n\nYour code returned the following error {code_return}. Please provide a detailed reflection on why this error was returned, which lines in the code caused this error, and exactly (line by line) how you hope to fix this in the next update. This step is mostly meant to reflect in order to help your future self fix the error better. Do not provide entirely new code but provide suggestions on how to fix the bug using LINE EDITS."
+            elif os.path.exists("submission.csv"):
+                self.prev_working_code = copy(self.code_lines)
+                grade_return = get_score(self.plan, "\n".join(self.prev_working_code), code_return, openai_api_key=self.openai_api_key)[0]
+                if not self.supress_print: print(f"@@@@ SUBMISSION: model score {grade_return}", REWARD_MODEL_LLM=self.llm_str)
+                f"Your code was properly submitted and you have just received a grade for your model.\nYour score was {grade_return}.\n\n"
+                reflect_prompt = f"This is your code: {code_str}\n\nYour code successfully returned a submission csv. Consider further improving your technique through advanced learning techniques, data augmentation, or hyperparamter tuning to increase the score. Please provide a detailed reflection on how to improve your performance, which lines in the code could be improved upon, and exactly (line by line) how you hope to improve this in the next update. This step is mostly meant to reflect in order to help your future self."
+
+                for file in os.listdir("."):
+                    if file.endswith(".csv"):
+                        os.system(f"rm {file}")
+            else:
+                if not self.supress_print: print("@@@@ No return")
+                reflect_prompt = f"This is your code: {code_str}\n\nYour code did not return an error, but also did not successfully submit a submission csv file. Please reflect on how you can improve your submission for the next cycle to submit a file and obtain a high score."
+        elif not self.should_execute_code:
+            code_return = "No changes were made to the code."
+            reflect_prompt = "Reflect on your future plans and next steps to improve the code."
+        reflection = self.reflection(reflect_prompt, code_str, code_return)
+        return f"Code return: {code_return}\n\nReflection: {reflection}"
+
+    def reflection(self, reflect_prompt, code_str, code_return):
+        """
+        Reflect on your future plans and next steps to improve the code
+        @param reflect_prompt: (str) reflection prompt
+        @param code_str: (str) code string
+        @return: (str) reflection string
+        """
+        refl = query_model(prompt=reflect_prompt, system_prompt=self.system_prompt(commands=False), model_str=f"{self.llm_str}", openai_api_key=self.openai_api_key)
+        return f"During the previous execution, the following code was run: \n\n{code_str}\n\nThis code returned the following: \n{code_return}\nThe following is your reflection from this feedback {refl}\n"
+
+    def generate_dataset_descr_prompt(self):
+        """
+        Generate description prompt for kaggle dataset
+        @param data_loader: (DataLoader) data loader
+        @return: (str) description prompt
+        """
+        return f"\n- The following dataset code will be added to the beginning of your code always, so this does not need to be rewritten: {self.dataset_code}"
+
+    def phase_prompt(self,):
+        """
+        Describe system role and general tips for mle-solver
+        @return: (str) system role
+        """
+        phase_str = (
+            "You are an ML engineer and you will be writing the code for a research project.\n"
+            "Your goal is to produce code that obtains final results for a set of research experiments. You should aim for simple code to collect all results, not complex code. You should integrate the provided literature review and the plan to make sure you are implementing everything outlined in the plan. The dataset code will be added to the beginning of your code always, so this does not need to be rewritten. Make sure you do not write functions, only loose code.\n"
+            "I would recommend writing smaller code so you do not run out of time but make sure to work on all points in the plan in the same code. You code should run every experiment outlined in the plan for a single code.\n",
+            "You cannot pip install new libraries, but many machine learning libraries already work. If you wish to use a language model in your code, please use the following:\nAnything you decide to print inside your code will be provided to you as input, and you will be able to see that part of the code. Using print statements is useful for figuring out what is wrong and understanding your code better."
+        )
+        return phase_str
+
+    def role_description(self):
+        """
+        Provide role description
+        @return: (str) role description
+        """
+        return "You are an expert machine learning engineer working at a top university to write code to solve machine learning research challenges using your machine learning expertise."
+
+    @staticmethod
+    def _common_code_errors():
+        """
+        Some general tips to avoid common code errors, also TF has many errors so we avoid this and ask to use pytorch
+        @return: (str) common code errors
+        """
+        return (
+            "Make sure to import everything that you are using.\n"
+            "Reflect on the code before writing it to make sure there are no bugs or compilation issues.\n"
+            "YOU MUST USE COMMANDS PROPERLY. Do not use the word COMMAND for the command that is incorrect. You must use an actual command (e.g. EDIT, REPLACE...) NOT THE WORD COMMAND. Do not make this mistake.\n"
+            "Under no circumstances should you use tensorflow or keras. Only use pytorch for scikitlearn for deep learning.\n"
+        )
+
+    def command_descriptions(self):
+        """
+        Provide command descriptions
+        @return: (str) command descriptions
+        """
+        cmd_strings = "\n".join([_cmd.docstring() for _cmd in self.commands])
+        return f"\nYou also have access to tools which can be interacted with using the following structure: ```COMMAND\n<command information here>\n```, where COMMAND is whichever command you want to run (e.g. EDIT, REPLACE...), <command information here> is information used for the command, such as code to run or a search query, and ``` are meant to encapsulate the command. ``` must be included as part of the command both at the beginning and at the end of the code. DO NOT FORGOT TO HAVE ``` AT THE TOP AND BOTTOM OF CODE. and this structure must be followed to execute a command correctly. YOU CAN ONLY EXECUTE A SINGLE COMMAND AT A TIME! Do not try to perform multiple commands EVER only one. {self._common_code_errors()}" + cmd_strings
+
+    def run_code(self):
+        """
+        Actually execute the code that was generated
+        @return: (str) code return
+        """
+        if self.prev_code_ret is not None:
+            return self.prev_code_ret
+        elif self.should_execute_code:
+            return execute_code("\n".join(self.code_lines))
+        return "Changes have not yet been made to the code."
+
+
+
+
+
+
+
+================================================
+FILE: papersolver.py
+================================================
+import random
+import string
+from utils import *
+from tools import *
+from copy import copy
+from inference import *
+from pathlib import Path
+from copy import deepcopy
+from common_imports import *
+from agents import get_score
+from abc import abstractmethod
+
+from contextlib import contextmanager
+import sys, os
+
+class Command:
+    def __init__(self):
+        self.cmd_type = "OTHER"
+
+    @abstractmethod
+    def docstring(self) -> str:
+        pass
+
+    @abstractmethod
+    def execute_command(self, *args) -> str:
+        pass
+
+    @abstractmethod
+    def matches_command(self, cmd_str) -> bool:
+        pass
+
+    @abstractmethod
+    def parse_command(self, cmd_str) -> tuple:
+        pass
+
+
+def execute_latex():
+    return True
+
+
+"""
+@@@@@@@@@@@@@@@@@@
+@@ SEARCH TOOLS @@
+@@@@@@@@@@@@@@@@@@
+"""
+
+class Arxiv(Command):
+    def __init__(self):
+        super().__init__()
+        self.arxiv_eng = ArxivSearch()
+        self.num_papers_per_search = 10
+        self.cmd_type = "SEARCH-arxiv"
+
+    def docstring(self) -> str:
+        return (
+            "============= ARXIV SEARCH TOOL ============="
+            "You also have access to machine learning paper from Arxiv. "
+            "To search for summaries of papers on arxiv you can use the following command: ```SUMMARY\n<search query>\n```\n where <search query> is a string that will be used as the search query to find papers with semantically similar content and SUMMARY is just the word SUMMARY.\n"
+            "To get the full paper text for an arXiv paper, use the following command: ```FULL_TEXT\n<arxiv paper id>\n```\n where <arxiv paper id> is the ID of the arXiv paper (which can be found by using the SUMMARY command), and FULL_TEXT is just the word FULL_TEXT. Make sure to read the full text using the FULL_TEXT command before adding it to your list of relevant papers.\n"
+            "When you read arxiv paper, make sure to take note of the techniques they are using to solve their problem as well as the hyperparameters and implementation details. These are very important for successfully solving machine learning problems."
+        )
+
+    def execute_command(self, *args) -> str:
+        # args[0] -> command
+        # args[1] -> query
+        if args[0] == "SUMMARY":
+            return self.arxiv_eng.find_papers_by_str(args[1], self.num_papers_per_search)
+        elif args[0] == "FULL_TEXT":
+            return self.arxiv_eng.retrieve_full_paper_text(args[1])
+        raise Exception("Invalid Arxiv Search")
+
+    def matches_command(self, cmd_str) -> bool:
+        if "```SUMMARY" in cmd_str: return True
+        elif "```FULL_TEXT" in cmd_str: return True
+        return False
+
+    def parse_command(self, *args) -> tuple:
+        sum_text = extract_prompt(args[0], "SUMMARY").split("\n")
+        full_text = extract_prompt(args[0], "FULL_TEXT").split("\n")
+        if len(sum_text) == 0 and len(full_text) == 0: return False, None
+        if len(sum_text) > 0: return True, ("SUMMARY", sum_text,)
+        if len(full_text) > 0: return True, ("FULL_TEXT", sum_text,)
+
+
+"""
+@@@@@@@@@@@@@@@@@@@
+@@ WRITING TOOLS @@
+@@@@@@@@@@@@@@@@@@@
+"""
+
+class PaperReplace(Command):
+    def __init__(self, save_loc):
+        super().__init__()
+        self.save_loc = save_loc
+        self.cmd_type = "PAPER-replace"
+
+    def docstring(self) -> str:
+        return (
+            "============= PAPER REPLACING TOOL =============\n"
+            "You also have access to a paper replacing tool. \n"
+            "This tool allows you to entirely re-write/replace all of the current latex and erase all existing latex.\n"
+            "You can use this tool via the following command: ```REPLACE\n<latex here>\n```, where REPLACE is the word REPLACE and <latex here> will be the new latex that is replacing the entire set of old latex. This tool is useful if you want to make very significant changes, such as entirely changing the model, or the learning process. Before changing the existing latex to be your new latex, your new latex will be tested and if it returns an error it will not replace the existing latex. Try limiting the use of rewriting and aim for editing the latex more."
+        )
+
+    def execute_command(self, *args) -> str:
+        # args[0] -> new latex
+        args = args[0]
+        return args[0]
+
+    def matches_command(self, cmd_str) -> bool:
+        if "```REPLACE" in cmd_str: return True
+        return False
+
+    def parse_command(self, *args) -> tuple:
+        new_latex = extract_prompt(args[0], "REPLACE")
+        latex_ret = compile_latex(new_latex, self.save_loc, compile=args[1])
+        if "[CODE EXECUTION ERROR]" in latex_ret: return False, (None, latex_ret,)
+        return True, (new_latex.split("\n"), latex_ret)
+
+
+
+class PaperEdit(Command):
+    def __init__(self, save_loc):
+        super().__init__()
+        self.save_loc = save_loc
+        self.cmd_type = "PAPER-edit"
+
+    def docstring(self) -> str:
+        return (
+            "============= PAPER EDITING TOOL =============\n"
+            "You also have access to a paper editing tool. \n"
+            "This tool allows you to replace lines indexed n through m (n:m) of the current latex with as many lines of new latex as you want to add. This removal is inclusive meaning that line n and m and everything between n and m is removed. This will be the primary way that you interact with latex. \n"
+            "You can edit latex using the following command: ```EDIT N M\n<new lines to replace old lines>\n``` EDIT is the word EDIT, N is the first line index you want to replace and M the last line index you want to replace (everything inbetween will also be removed), and <new lines to replace old lines> will be the new latex that is replacing the old latex. Before changing the existing latex to be your new latex, your new latex will be tested and if it returns an error it will not replace the existing latex. Your changes should significantly change the latex. You should write new paragraphs and update old ones. Try using the edit command often. Make sure to generate lots of text. You should also avoid editing lines 0 0, and should edit the main text of the paragraphs, such as editing lines in the middle of the text body."
+        )
+
+    def execute_command(self, *args) -> str:
+        # args[0] -> N (int)
+        # args[1] -> M (int)
+        # args[2] -> old latex
+        # args[3] -> new lines to replace
+        try:
+            args = args[0]
+            current_latex = args[2]
+            lines_to_add = list(reversed(args[3]))
+            lines_to_replace = list(reversed(range(args[0], args[1]+1)))
+            for _ln in lines_to_replace:
+                current_latex.pop(_ln)
+            for _line in lines_to_add:
+                current_latex.insert(args[0], _line)
+            new_latex = "\n".join(current_latex)
+            latex_exec = f"{new_latex}"
+            latex_ret = compile_latex(latex_exec, self.save_loc, compile=args[4])
+            if "error" in latex_ret.lower(): return (False, None, latex_ret)
+            return (True, current_latex, latex_ret)
+        except Exception as e:
+            return (False, None, str(e))
+
+    def matches_command(self, cmd_str) -> bool:
+        if "```EDIT" in cmd_str: return True
+        return False
+
+    def parse_command(self, *args) -> tuple:
+        cmd_str, latexlines = args[0], args[1]
+        success = True
+        try:
+            text = extract_prompt(cmd_str, "EDIT").split("\n")
+            if len(text) == 0: return False, (None, None, None, None)
+            lines_to_edit = text[0].split(" ")
+            if len(lines_to_edit) != 2: return False, (None, None, None, None)
+            lines_to_edit = [int(_) for _ in lines_to_edit]
+            if len(text[1:]) == 0: return False, (None, None, None, None)
+            return success, (lines_to_edit[0], lines_to_edit[1], latexlines, text[1:])
+        except Exception as e:
+            return False, (None, None, None, None)
+
+
+
+
+# Modified version of section tips from the AI scientist paper!
+# Good work guys :) https://github.com/SakanaAI/AI-Scientist/blob/main/ai_scientist/perform_writeup.py
+per_section_tips = {
+    "abstract": """
+- TL;DR of the paper
+- What are we trying to do and why is it relevant?
+- Why is this hard? 
+- How do we solve it (i.e. our contribution!)
+- How do we verify that we solved it (e.g. Experiments and results)
+- This must only be a single paragraph, not more.
+
+Please make sure the abstract reads smoothly and is well-motivated. This should be one continuous paragraph with no breaks between the lines.
+""",
+    "introduction": """
+- Longer version of the Abstract, i.e. of the entire paper
+- What are we trying to do and why is it relevant?
+- Why is this hard? 
+- How do we solve it (i.e. our contribution!)
+- How do we verify that we solved it (e.g. Experiments and results)
+- New trend: specifically list your contributions as bullet points
+- Extra space? Future work!
+""",
+    "related work": """
+- Academic siblings of our work, i.e. alternative attempts in literature at trying to solve the same problem. 
+- Goal is to “Compare and contrast” - how does their approach differ in either assumptions or method? If their method is applicable to our Problem Setting I expect a comparison in the experimental section. If not, there needs to be a clear statement why a given method is not applicable. 
+- Note: Just describing what another paper is doing is not enough. We need to compare and contrast.
+""",
+    "background": """
+- Academic Ancestors of our work, i.e. all concepts and prior work that are required for understanding our method. 
+- Usually includes a subsection, Problem Setting, which formally introduces the problem setting and notation (Formalism) for our method. Highlights any specific assumptions that are made that are unusual. 
+- Make sure to use mathematical notation when necessary.
+- Note: If our paper introduces a novel problem setting as part of its contributions, it's best to have a separate Section.
+""",
+    "methods": """
+- What we do. Why we do it. All described using the general Formalism introduced in the Problem Setting and building on top of the concepts / foundations introduced in Background.
+- Make sure you clearly report precise mathematical equations in the methods section and the precise methodology.
+""",
+    "experimental setup": """
+- How do we test that our stuff works? Introduces a specific instantiation of the Problem Setting and specific implementation details of our Method for this Problem Setting.
+- Do not imagine unknown hardware details.
+- Includes a description of the dataset, evaluation metrics, important hyperparameters, and implementation details.
+""",
+    "results": """
+- Shows the results of running Method on our problem described in Experimental Setup.
+- Includes statements on hyperparameters and other potential issues of fairness.
+- Only includes results that have actually been run and saved in the logs. Do not hallucinate results that don't exist.
+- Make sure you clearly and numerically report experimental results in the results section.
+- If results exist: compares to baselines and includes statistics and confidence intervals. 
+- If results exist: includes ablation studies to show that specific parts of the method are relevant.
+- Discusses limitations of the method.
+- Make sure to include all the results from the experiments, and include all relevant figures.
+""",
+    "discussion": """
+- Brief recap of the entire paper.
+- To keep going with the analogy, you can think of future work as (potential) academic offspring.
+""",
+}
+
+class PaperSolver:
+    def __init__(self, llm_str, notes=None, max_steps=10, insights=None, plan=None, exp_code=None, exp_results=None, lit_review=None, ref_papers=None, topic=None, openai_api_key=None, compile_pdf=True, save_loc=None):
+        self.supress_print = True
+        if notes is None: self.notes = []
+        else: self.notes = notes
+        if plan is None: self.plan = ""
+        else: self.plan = plan
+        if exp_code is None: self.exp_code = ""
+        else: self.exp_code = exp_code
+        if exp_results is None: self.exp_results = ""
+        else: self.exp_results = exp_results
+        if lit_review is None: self.lit_review = ""
+        else: self.lit_review = lit_review
+        if insights is None: self.insights = ""
+        else: self.insights = insights
+        if ref_papers is None: self.ref_papers = ""
+        else: self.ref_papers = ref_papers
+        if topic is None: self.topic = ""
+        else: self.topic = topic
+        self.save_loc = save_loc
+        self.compile_pdf = compile_pdf
+        self.llm_str = llm_str
+        self.notes = notes
+        self.max_papers = 1
+        self.st_hist_len = 10
+        self.min_gen_trials = 2
+        self.max_steps = max_steps
+        self.paper_lines = str()
+        self.prev_paper_ret = str()
+        self.section_related_work = {}
+        self.openai_api_key = openai_api_key
+
+    def solve(self):
+        num_attempts = 0
+        best_pkg = None
+        top_score = None
+        self.prev_paper_ret = None
+        while True:
+            self.paper_lines = copy(random.choice(self.best_report)[0])
+            model_resp = query_model(
+                model_str=self.model,
+                system_prompt=self.system_prompt(),
+                prompt=f"\nNow please enter a command: ",
+                temp=1.0,
+                openai_api_key=self.openai_api_key)
+            model_resp = self.clean_text(model_resp)
+            cmd_str, paper_lines, prev_paper_ret, score = self.process_command(model_resp)
+            if score is not None:
+                if top_score is None:
+                    best_pkg = copy(paper_lines), copy(prev_paper_ret), copy(model_resp), copy(cmd_str)
+                    top_score = score
+                elif score > top_score:
+                    best_pkg = copy(paper_lines), copy(prev_paper_ret), copy(model_resp), copy(cmd_str)
+                    top_score = score
+            if num_attempts >= self.min_gen_trials and top_score is not None: break
+            if not self.supress_print: print(f"@@@ Command Exec // Attempt {num_attempts}: ", str(cmd_str).replace("\n", " | "))
+            if not self.supress_print: print(f"$$$ Score: {score}")
+            num_attempts += 1
+        self.paper_lines, self.prev_paper_ret, model_resp, cmd_str = best_pkg
+        # add top scoring paper that was successful to the best papers
+        if top_score > self.best_report[-1][1]:
+            # replace the lowest scoring one
+            if len(self.best_report) >= self.max_papers:
+                self.best_report.pop(-1)
+            self.best_report.append((copy(self.paper_lines), copy(top_score), self.prev_paper_ret))
+            # sort by score, to make sure lowest are removed in future
+            self.best_report.sort(key=lambda x: x[1], reverse=True)
+        return model_resp, cmd_str
+
+    def initial_solve(self):
+        """
+        Initialize the solver and get an initial set of papers and a return
+        @return: None
+        """
+        # @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+        # @@ Initial PaperGen Commands @@
+        # @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+        self.best_score = None
+        self.commands = [PaperReplace(self.save_loc)]
+        self.model = f"{self.llm_str}"
+        init_report, init_return, self.best_score = self.gen_initial_report()
+        self.best_report = [(copy(init_report), self.best_score, init_return) for _ in range(1)]
+
+        self.paper_lines = init_report
+        self.model = f"{self.llm_str}"
+        self.commands = [PaperEdit(self.save_loc)] #, Replace()]
+        self.prev_working_report = copy(self.paper_lines)
+
+    @staticmethod
+    def clean_text(text):
+        text = text.replace("```\n", "```")
+        return text
+
+    def gen_initial_report(self):
+        num_attempts = 0
+        arx = ArxivSearch()
+        section_scaffold = str()
+        #  1. Abstract 2. Introduction, 3. Background, 4. Methods, 5. Experimental Setup 6. Results, and 7. Discussion
+        for _section in ["scaffold", "abstract", "introduction", "related work", "background", "methods", "experimental setup", "results", "discussion"]:
+            section_complete = False
+            if _section in ["introduction", "related work", "background", "methods", "discussion"]:
+                attempts = 0
+                papers = str()
+                first_attempt = True
+                while len(papers) == 0:
+                    att_str = str()
+                    if attempts > 5:
+                        break
+                    if not first_attempt:
+                        att_str = "This is not your first attempt please try to come up with a simpler search query."
+                    search_query = query_model(model_str=f"{self.llm_str}", prompt=f"Given the following research topic {self.topic} and research plan: \n\n{self.plan}\n\nPlease come up with a search query to find relevant papers on arXiv. Respond only with the search query and nothing else. This should be a a string that will be used to find papers with semantically similar content. {att_str}", system_prompt=f"You are a research paper finder. You must find papers for the section {_section}. Query must be text nothing else.", openai_api_key=self.openai_api_key)
+                    search_query.replace('"', '')
+                    papers = arx.find_papers_by_str(query=search_query, N=10)
+                    first_attempt = False
+                    attempts += 1
+                if len(papers) != 0:
+                    self.section_related_work[_section] = papers
+            while not section_complete:
+                section_scaffold_temp = copy(section_scaffold)
+                if num_attempts == 0: err = str()
+                else: err = f"The following was the previous command generated: {model_resp}. This was the error return {cmd_str}. You should make sure not to repeat this error and to solve the presented problem."
+                if _section == "scaffold":
+                    prompt = f"{err}\nNow please enter the ```REPLACE command to create the scaffold:\n "
+                else:
+                    rp = str()
+                    if _section in self.section_related_work:
+                        rp = f"Here are related papers you can cite: {self.section_related_work[_section]}. You can cite them just by putting the arxiv ID in parentheses, e.g. (arXiv 2308.11483v1)\n"
+                    prompt = f"{err}\n{rp}\nNow please enter the ```REPLACE command to create the designated section, make sure to only write the text for that section and nothing else. Do not include packages or section titles, just the section content:\n "
+                model_resp = query_model(
+                    model_str=self.model,
+                    system_prompt=self.system_prompt(section=_section),
+                    prompt=f"{prompt}",
+                    temp=0.8,
+                    openai_api_key=self.openai_api_key)
+                model_resp = self.clean_text(model_resp)
+                if _section == "scaffold":
+                    # minimal scaffold (some other sections can be combined)
+                    for _sect in ["[ABSTRACT HERE]", "[INTRODUCTION HERE]", "[METHODS HERE]", "[RESULTS HERE]", "[DISCUSSION HERE]"]:
+                        if _sect not in model_resp:
+                            cmd_str = "Error: scaffold section placeholders were not present (e.g. [ABSTRACT HERE])."
+                            if not self.supress_print: print("@@@ INIT ATTEMPT:", cmd_str)
+                            continue
+                elif _section != "scaffold":
+                    new_text = extract_prompt(model_resp, "REPLACE")
+                    section_scaffold_temp = section_scaffold_temp.replace(f"[{_section.upper()} HERE]", new_text)
+                    model_resp = '```REPLACE\n' + copy(section_scaffold_temp) + '\n```'
+                    if "documentclass{article}" in new_text or "usepackage{" in new_text:
+                            cmd_str = "Error: You must not include packages or documentclass in the text! Your latex must only include the section text, equations, and tables."
+                            if not self.supress_print: print("@@@ INIT ATTEMPT:", cmd_str)
+                            continue
+                cmd_str, latex_lines, prev_latex_ret, score = self.process_command(model_resp, scoring=False)
+                if not self.supress_print: print(f"@@@ INIT ATTEMPT: Command Exec // Attempt {num_attempts}: ", str(cmd_str).replace("\n", " | "))
+                #print(f"$$$ Score: {score}")
+                if score is not None:
+                    section_complete = True
+                    section_scaffold = "\n".join(latex_lines)
+                num_attempts += 1
+            self.paper_lines = section_scaffold.split("\n")
+            if not self.supress_print: print("$"*10, f"SCAFFOLD [{_section}] CREATED", "$"*10)
+        if not self.supress_print: print("$"*10, "SCAFFOLD CREATED", "$"*10)
+        return latex_lines, prev_latex_ret, score
+
+    def process_command(self, model_resp, scoring=True):
+        """
+        Take command from language model and execute if valid
+        @param model_resp: (str) language model output
+        @return: (tuple) tuple containing the following items
+            - cmd_str: (str) paper execution return and success flag
+            - paper_lines: (list) list of paper lines as strings
+            - prev_paper_ret: (str) output from running paper
+            - score: (float) score of model
+        """
+        cmd_str = None
+        score = None
+        prev_paper_ret = self.prev_paper_ret
+        paper_lines = copy(self.paper_lines)
+        if "\\includegraphics[width=\\textwidth]{Figure_1.png}" in model_resp or "\\includegraphics[width=\\textwidth]{Figure_2.png}" in model_resp:
+            cwd = os.getcwd()
+            model_resp = model_resp.replace("\\includegraphics[width=\\textwidth]{Figure_1.png}", "\\includegraphics[width=\\textwidth]{" + cwd + "/Figure_1.png}")
+            model_resp = model_resp.replace("\\includegraphics[width=\\textwidth]{Figure_2.png}", "\\includegraphics[width=\\textwidth]{" + cwd + "/Figure_2.png}")
+        for cmd in self.commands:
+            if cmd.matches_command(model_resp):
+                # attempt to execute the paper edit command
+                if cmd.cmd_type == "PAPER-edit": # DONE
+                    score = None
+                    failed = True
+                    success, args = cmd.parse_command(model_resp, paper_lines)
+                    paper_err = f"Return from executing latex: {args[1]}"
+                    if success:
+                        # True, current_latex, latex_ret
+                        args = cmd.execute_command((args[0], args[1], paper_lines, args[3], self.compile_pdf))
+                        success = success and args[0]
+                        if not success: pass
+                        else:
+                            paper_lines = copy(args[1]) #
+                            if scoring:
+                                score, cmd_str, is_valid = get_score(self.plan, "\n".join(paper_lines), reward_model_llm=self.llm_str)
+                            else:
+                                score, cmd_str, is_valid = 0.0, "Paper scored successfully", True
+                            if is_valid: failed = False
+                            paper_err += f"\nReturn from executing latex: {cmd_str}"
+                        if not self.supress_print: print("$$$$ PAPER EDIT (success)")
+                    if failed:
+                        cmd_str = f"Paper edit FAILED due to the following error: {paper_err}.  Paper was reverted back to original state before edits."
+                        if not self.supress_print: print("$$$$ PAPER EDIT (failed)")
+                    else:
+                        cmd_str = "Paper was successfully edited."
+                        paper_lines = copy(args[1])
+                        prev_paper_ret = copy(args[2])
+                        if not self.supress_print: print("$$$$ PAPER EDIT (success)")
+                elif cmd.cmd_type == "PAPER-replace": # DONE
+                    score = None
+                    failed = True
+                    success, args = cmd.parse_command(model_resp, self.compile_pdf)
+                    paper_err = f"Return from executing latex: {args[1]}"
+                    if success:
+                        paper_lines = copy(args[0]) #
+                        if scoring:
+                            score, cmd_str, is_valid = get_score(self.plan, "\n".join(paper_lines), reward_model_llm=self.llm_str)
+                        else:
+                            score, cmd_str, is_valid = 0.0, "Paper scored successfully", True
+                        if is_valid: failed = False
+                        paper_err += f"\nReturn from executing code on real test set {cmd_str}"
+                    if failed:
+                        cmd_str = f"Paper replacement FAILED due to the following error: {paper_err}.  Paper was reverted back to original state before edits."
+                        if not self.supress_print: print("$$$$ PAPER REPLACE (failed)")
+                    else:
+                        cmd_str = "Paper was successfully replaced."
+                        paper_lines = copy(args[0])
+                        prev_paper_ret = copy(args[1])
+                        if not self.supress_print: print("$$$$ PAPER REPLACE (success)")
+        return cmd_str, paper_lines, prev_paper_ret, score
+
+    def generate_paper_lines(self, code):
+        """
+        Generate well-formatted code lines with line numbers
+        @param code: (list) list of code line strings
+        @return: (str) code lines formatted with line numbers
+        """
+        codestr = str()
+        for _index in range(len(code)):
+            codestr += f"{_index} |{code[_index]}\n"
+        return codestr
+
+    def system_prompt(self, commands=True, section=None):
+        """
+        Produce a system prompt for the paper-solver
+        @param commands: (bool) whether to use command prompt
+        @return: (str) system prompt
+        """
+        if section == "abstract": length = "This section should be ONLY 1 paragraph."
+        else: length = "This section should be approximately 2-4 paragraphs and so your output should be several paragraphs of latex."
+        methods_str = str()
+        if section == "methods":
+            fig1_text="""\n\\begin{figure}[h]
+\\caption{<caption here>}
+\\centering
+\\includegraphics[width=\\textwidth]{Figure_1.png}
+\\label{fig:fig1}
+\\end{figure}\n"""
+            fig2_text="""\n\\begin{figure}[h]
+\\caption{<caption here>}
+\\centering
+\\includegraphics[width=\\textwidth]{Figure_2.png}
+\\label{fig:fig1}
+\\end{figure}\n"""
+            if os.path.exists("Figure_1.png") and os.path.exists("Figure_2.png"):
+                methods_str += f"You ABSOLUTELY must without fail also include Figure_1.png and Figure_2.png in your paper using {fig1_text} and {fig2_text} on a new line. Make sure to place these figures in separate locations."
+            elif os.path.exists("Figure_1.png"):
+                methods_str += f"You ABSOLUTELY must without fail also include Figure_1.png in your paper using {fig1_text} on a new line.\n"
+            elif os.path.exists("Figure_2.png"):
+                methods_str += f"You ABSOLUTELY must without fail also include Figure_2.png in your paper using {fig2_text} on a new line.\n"
+        if section is not None and section == "scaffold": section_cmd = f"Your objective right now is to only build the scaffolding for the paper. You should not include any text in the body of the paper, but should have an empty scaffold for each of the sections.  Where the sections go, write [ABSTRACT HERE] for abstract, and write [INTRODUCTION HERE] for the introduction... etc. Your paper should have the following sections: 1. Abstract 2. Introduction, 3. Background, 4. Related Work 5. Methods, 6. Experimental Setup 7. Results, and 8. Discussion. Just create the scaffolding as compilable latex. Your title should start with Research Report: [title here] where title here is a title you choose. For author write Agent Laboratory."
+        elif section is not None: section_cmd = f"Your only goal is to generate latex for the following {section}. DO NOT INCLUDE ANY PACKAGES OR ANY SECTION COMMANDS. DO NOT INCLUDE A TITLE OR DATE ONLY TEXT. You only have to generate text for this specific section and do not have to output anything else. {length} I repeat DO NOT INCLUDE ANY PACKAGES OR ANY SECTION COMMANDS. DO NOT INCLUDE A TITLE OR DATE ONLY TEXT. Use as many equations as you find necessary. You should include mathematical equations, numbers, and tables where necessary. Remember that to include a percentage sign % you must add a backslash \% or else it will become a comment. Here are some tips {per_section_tips[section]}  {methods_str}.\n\n"
+        else: section_cmd = ""
+        paper_len = sum([i.strip(string.punctuation).isalpha() for i in ("".join(self.paper_lines)).split()])
+        #paper_len2 = len(("".join(self.paper_lines)).split())
+        if paper_len < 4000: paper_progress = f"The current length of the paper is {paper_len} words, you must increase this by {4000-paper_len} words."
+        else: paper_progress = ""
+        if not self.supress_print: print(paper_progress)
+        cmd_set = f"The following are commands you have access to: {self.command_descriptions()}\n." if commands else ""
+        if len(self.ref_papers) == 0: ref_papers = ""
+        else:
+            refpapers = '\n'.join(self.ref_papers)
+            ref_papers = f"Here is a reference paper that is high quality:\n{refpapers}\n\n\n"
+        lit_review_str = str(self.lit_review)[:20000]
+        return (
+            f"{ref_papers}"
+            # ROLE DESCRIPTION
+            f"{self.role_description()}.\n"
+            # TASK INSTRUCTIONS
+            f"The following are your task instructions: {self.phase_prompt()}\n"
+            # NOTES
+            f"The following are notes, instructions, and general tips for you: {self.notes}"
+            # LIT REVIEW
+            f"The following literature review was provided for the paper:\n{lit_review_str}\n"
+            # PLAN DESCRIPTION
+            f"You are given a paper report writing task. The original research plan was described as follows: {self.plan}\n"
+            # EXPERIMENT CODE
+            f"A team of research wrote the following code, following this plan: {self.exp_code}\n"
+            # EXPERIMENT RESULTS
+            f"After running this code, the following results were observed: {self.exp_results}\n Your results must ACCURATELY reflect the numbers presented here."
+            # EXPERIMENT RESULT INSIGHTS
+            f"Provided was an interpretation of the experimental results:\n{self.insights}\n"
+            f"Your writing style should be boring and objective.\n"
+            # transition
+            f"Your goal is to write a research paper as well as possible. You will receive a score after you write the paper and should aim to maximize the score by writing a high quality research paper. The paper length should be 8 pages or 4000 words in total. It should be quite long and comprehensive. Remember, the paper MUST BE LONG. {paper_progress}\n"
+            # COMMAND SET
+            f"{cmd_set}\n"
+            # PAPER
+            f"Provided here is your current paper {self.generate_paper_lines(self.paper_lines)}"
+            # optional section command
+            f"{section_cmd}"
+        )
+
+    def command_descriptions(self):
+        """
+        Provide command descriptions
+        @return: (str) command descriptions
+        """
+        cmd_strings = "\n".join([_cmd.docstring() for _cmd in self.commands])
+        return f"\nYou also have access to tools which can be interacted with using the following structure: ```COMMAND\n<command information here>\n```, where COMMAND is whichever command you want to run (e.g. EDIT,...), <command information here> is information used for the command and ``` are meant to encapsulate the command. ``` must be included as part of the command both at the beginning and at the end of the command. DO NOT FORGOT TO HAVE ``` AT THE TOP AND BOTTOM OF COMMAND. and this structure must be followed to execute a command correctly. YOU CAN ONLY EXECUTE A SINGLE COMMAND AT A TIME! Do not try to perform multiple commands EVER only one." + cmd_strings
+
+    def role_description(self):
+        """
+        Provide role description
+        @return: (str) role description
+        """
+        return "You are a computer science PhD student at a top university who has submitted their paper to an ML conference called ICLR. Your goal was to write a research paper and get high scores from the reviewers so that it get accepted to the conference. Your paper should be approximately 8 pages and around 4000 words. Your article should ONLY CONTAIN EIGHT sections as follows: 1. Abstract 2. Introduction, 3. Background, 4. Related Work 5. Methods, 6. Experimental Setup 7. Results, and 8. Discussion.\n"
+
+
+    def phase_prompt(self,):
+        """
+        Describe system role and general tips for mle-solver
+        @return: (str) system role
+        """
+        phase_str = (
+            "You are a PhD student who has submitted a paper to an ML conference called ICLR. Your goal was to write a research paper and get high scores from the reviewers so that it get accepted to the conference.\n"
+        )
+        return phase_str
+
+
+
+
+
+
+================================================
+FILE: requirements.txt
+================================================
+absl-py==2.1.0
+accelerate==1.1.1
+aiohappyeyeballs==2.4.3
+aiohttp==3.11.7
+aiosignal==1.3.1
+annotated-types==0.7.0
+anthropic==0.39.0
+anyio==4.6.2.post1
+arxiv==2.1.3
+astunparse==1.6.3
+async-timeout==5.0.1
+attrs==24.2.0
+blis==1.0.1
+catalogue==2.0.10
+certifi==2024.8.30
+charset-normalizer==3.4.0
+click==8.1.7
+cloudpathlib==0.20.0
+confection==0.1.5
+contourpy==1.3.0
+cycler==0.12.1
+cymem==2.0.10
+datasets==3.1.0
+diffusers==0.31.0
+dill==0.3.8
+distro==1.9.0
+exceptiongroup==1.2.2
+feedparser==6.0.11
+filelock==3.16.1
+flatbuffers==24.3.25
+fonttools==4.55.0
+frozenlist==1.5.0
+fsspec==2024.9.0
+gast==0.6.0
+google-pasta==0.2.0
+grpcio==1.68.0
+h11==0.14.0
+h5py==3.12.1
+httpcore==1.0.7
+httpx==0.27.2
+huggingface-hub==0.26.2
+idna==3.10
+imageio==2.36.0
+importlib_metadata==8.5.0
+importlib_resources==6.4.5
+Jinja2==3.1.4
+jiter==0.7.1
+joblib==1.4.2
+keras==3.7.0
+kiwisolver==1.4.7
+langcodes==3.5.0
+language_data==1.3.0
+lazy_loader==0.4
+libclang==18.1.1
+marisa-trie==1.2.1
+Markdown==3.7
+markdown-it-py==3.0.0
+MarkupSafe==3.0.2
+matplotlib==3.9.2
+mdurl==0.1.2
+ml-dtypes==0.4.1
+mpmath==1.3.0
+multidict==6.1.0
+multiprocess==0.70.16
+murmurhash==1.0.11
+namex==0.0.8
+nest-asyncio==1.6.0
+networkx==3.2.1
+nltk==3.9.1
+numpy==2.0.2
+openai==1.55.1
+opt_einsum==3.4.0
+optree==0.13.1
+packaging==24.2
+pandas==2.2.3
+patsy==1.0.1
+pillow==11.0.0
+plotly==5.24.1
+preshed==3.0.9
+propcache==0.2.0
+protobuf==5.28.3
+psutil==6.1.0
+pyarrow==18.1.0
+pydantic==2.10.2
+pydantic_core==2.27.1
+Pygments==2.18.0
+pyparsing==3.2.0
+pypdf==5.1.0
+python-dateutil==2.9.0.post0
+pytz==2024.2
+PyYAML==6.0.2
+regex==2024.11.6
+requests==2.32.3
+rich==13.9.4
+sacremoses==0.1.1
+safetensors==0.4.5
+scikit-image==0.24.0
+scikit-learn==1.5.2
+scipy==1.13.1
+seaborn==0.13.2
+semanticscholar==0.8.4
+sgmllib3k==1.0.0
+shellingham==1.5.4
+six==1.16.0
+smart-open==7.0.5
+sniffio==1.3.1
+spacy==3.8.2
+spacy-legacy==3.0.12
+spacy-loggers==1.0.5
+srsly==2.4.8
+statsmodels==0.14.4
+sympy==1.13.1
+tenacity==9.0.0
+termcolor==2.5.0
+thinc==8.3.2
+threadpoolctl==3.5.0
+tifffile==2024.8.30
+tiktoken==0.8.0
+tokenizers==0.20.4
+torch==2.5.1
+tqdm==4.67.1
+transformers==4.46.3
+typer==0.13.1
+typing_extensions==4.12.2
+tzdata==2024.2
+urllib3==2.2.3
+wasabi==1.1.3
+weasel==0.4.1
+Werkzeug==3.1.3
+wrapt==1.17.0
+xxhash==3.5.0
+yarl==1.18.0
+zipp==3.21.0
+google-generativeai
+PyPDF2
+
+
+
+================================================
+FILE: tools.py
+================================================
+from utils import *
+
+import os
+import time
+import arxiv
+import io, sys
+import traceback
+import matplotlib
+import numpy as np
+import multiprocessing
+from pypdf import PdfReader
+from datasets import load_dataset
+from psutil._common import bytes2human
+from datasets import load_dataset_builder
+from semanticscholar import SemanticScholar
+from sklearn.metrics.pairwise import linear_kernel
+from sklearn.feature_extraction.text import TfidfVectorizer
+
+
+
+class HFDataSearch:
+    def __init__(self, like_thr=3, dwn_thr=50) -> None:
+        """
+        Class for finding relevant huggingface datasets
+        :param like_thr:
+        :param dwn_thr:
+        """
+        self.dwn_thr = dwn_thr
+        self.like_thr = like_thr
+        self.ds = load_dataset("nkasmanoff/huggingface-datasets")["train"]
+
+        # Initialize lists to collect filtered data
+        filtered_indices = []
+        filtered_descriptions = []
+        filtered_likes = []
+        filtered_downloads = []
+
+        # Iterate over the dataset and filter based on criteria
+        for idx, item in enumerate(self.ds):
+            # Get likes and downloads, handling None values
+            likes = int(item['likes']) if item['likes'] is not None else 0
+            downloads = int(item['downloads']) if item['downloads'] is not None else 0
+
+            # Check if likes and downloads meet the thresholds
+            if likes >= self.like_thr and downloads >= self.dwn_thr:
+                # Check if the description is a non-empty string
+                description = item['description']
+                if isinstance(description, str) and description.strip():
+                    # Collect the data
+                    filtered_indices.append(idx)
+                    filtered_descriptions.append(description)
+                    filtered_likes.append(likes)
+                    filtered_downloads.append(downloads)
+
+        # Check if any datasets meet all criteria
+        if not filtered_indices:
+            print("No datasets meet the specified criteria.")
+            self.ds = []
+            self.descriptions = []
+            self.likes_norm = []
+            self.downloads_norm = []
+            self.description_vectors = None
+            return  # Exit the constructor
+
+        # Filter the datasets using the collected indices
+        self.ds = self.ds.select(filtered_indices)
+
+        # Update descriptions, likes, and downloads
+        self.descriptions = filtered_descriptions
+        self.likes = np.array(filtered_likes)
+        self.downloads = np.array(filtered_downloads)
+
+        # Normalize likes and downloads
+        self.likes_norm = self._normalize(self.likes)
+        self.downloads_norm = self._normalize(self.downloads)
+
+        # Vectorize the descriptions
+        self.vectorizer = TfidfVectorizer()
+        self.description_vectors = self.vectorizer.fit_transform(self.descriptions)
+
+    def _normalize(self, arr):
+        min_val = arr.min()
+        max_val = arr.max()
+        if max_val - min_val == 0:
+            return np.zeros_like(arr, dtype=float)
+        return (arr - min_val) / (max_val - min_val)
+
+    def retrieve_ds(self, query, N=10, sim_w=1.0, like_w=0.0, dwn_w=0.0):
+        """
+        Retrieves the top N datasets matching the query, weighted by likes and downloads.
+        :param query: The search query string.
+        :param N: The number of results to return.
+        :param sim_w: Weight for cosine similarity.
+        :param like_w: Weight for likes.
+        :param dwn_w: Weight for downloads.
+        :return: List of top N dataset items.
+        """
+        if not self.ds or self.description_vectors is None:
+            print("No datasets available to search.")
+            return []
+
+        query_vector = self.vectorizer.transform([query])
+        cosine_similarities = linear_kernel(query_vector, self.description_vectors).flatten()
+        # Normalize cosine similarities
+        cosine_similarities_norm = self._normalize(cosine_similarities)
+        # Compute final scores
+        final_scores = (
+                sim_w * cosine_similarities_norm +
+                like_w * self.likes_norm +
+                dwn_w * self.downloads_norm
+        )
+        # Get top N indices
+        top_indices = final_scores.argsort()[-N:][::-1]
+        # Convert indices to Python ints
+        top_indices = [int(i) for i in top_indices]
+        top_datasets = [self.ds[i] for i in top_indices]
+        # check if dataset has a test & train set
+        has_test_set = list()
+        has_train_set = list()
+        ds_size_info = list()
+        for i in top_indices:
+            try:
+                dbuilder = load_dataset_builder(self.ds[i]["id"], trust_remote_code=True).info
+            except Exception as e:
+                has_test_set.append(False)
+                has_train_set.append(False)
+                ds_size_info.append((None, None, None, None))
+                continue
+
+            if dbuilder.splits is None:
+                has_test_set.append(False)
+                has_train_set.append(False)
+                ds_size_info.append((None, None, None, None))
+                continue
+            # Print number of examples for
+            has_test, has_train = "test" in dbuilder.splits, "train" in dbuilder.splits
+            has_test_set.append(has_test)
+            has_train_set.append(has_train)
+            test_dwn_size, test_elem_size = None, None
+            train_dwn_size, train_elem_size = None, None
+            if has_test:
+                test_dwn_size = bytes2human(dbuilder.splits["test"].num_bytes)
+                test_elem_size = dbuilder.splits["test"].num_examples
+            if has_train:
+                train_dwn_size = bytes2human(dbuilder.splits["train"].num_bytes)
+                train_elem_size = dbuilder.splits["train"].num_examples
+            ds_size_info.append((test_dwn_size, test_elem_size, train_dwn_size, train_elem_size))
+        for _i in range(len(top_datasets)):
+            top_datasets[_i]["has_test_set"] = has_test_set[_i]
+            top_datasets[_i]["has_train_set"] = has_train_set[_i]
+            top_datasets[_i]["test_download_size"] = ds_size_info[_i][0]
+            top_datasets[_i]["test_element_size"] = ds_size_info[_i][1]
+            top_datasets[_i]["train_download_size"] = ds_size_info[_i][2]
+            top_datasets[_i]["train_element_size"] = ds_size_info[_i][3]
+        return top_datasets
+
+    def results_str(self, results):
+        """
+        Provide results as list of results in human-readable format.
+        :param results: (list(dict)) list of results from search
+        :return: (list(str)) list of results in human-readable format
+        """
+        result_strs = list()
+        for result in results:
+            res_str = f"Dataset ID: {result['id']}\n"
+            res_str += f"Description: {result['description']}\n"
+            res_str += f"Likes: {result['likes']}\n"
+            res_str += f"Downloads: {result['downloads']}\n"
+            res_str += f"Has Testing Set: {result['has_test_set']}\n"
+            res_str += f"Has Training Set: {result['has_train_set']}\n"
+            res_str += f"Test Download Size: {result['test_download_size']}\n"
+            res_str += f"Test Dataset Size: {result['test_element_size']}\n"
+            res_str += f"Train Download Size: {result['train_download_size']}\n"
+            res_str += f"Train Dataset Size: {result['train_element_size']}\n"
+            result_strs.append(res_str)
+        return result_strs
+
+
+class SemanticScholarSearch:
+    def __init__(self):
+        self.sch_engine = SemanticScholar(retry=False)
+
+    def find_papers_by_str(self, query, N=10):
+        paper_sums = list()
+        results = self.sch_engine.search_paper(query, limit=N, min_citation_count=3, open_access_pdf=True)
+        for _i in range(len(results)):
+            paper_sum = f'Title: {results[_i].title}\n'
+            paper_sum += f'Abstract: {results[_i].abstract}\n'
+            paper_sum += f'Citations: {results[_i].citationCount}\n'
+            paper_sum += f'Release Date: year {results[_i].publicationDate.year}, month {results[_i].publicationDate.month}, day {results[_i].publicationDate.day}\n'
+            paper_sum += f'Venue: {results[_i].venue}\n'
+            paper_sum += f'Paper ID: {results[_i].externalIds["DOI"]}\n'
+            paper_sums.append(paper_sum)
+        return paper_sums
+
+    def retrieve_full_paper_text(self, query):
+        pass
+
+
+class ArxivSearch:
+    def __init__(self):
+        # Construct the default API client.
+        self.sch_engine = arxiv.Client()
+        
+    def _process_query(self, query: str) -> str:
+        """Process query string to fit within MAX_QUERY_LENGTH while preserving as much information as possible"""
+        MAX_QUERY_LENGTH = 300
+        
+        if len(query) <= MAX_QUERY_LENGTH:
+            return query
+        
+        # Split into words
+        words = query.split()
+        processed_query = []
+        current_length = 0
+        
+        # Add words while staying under the limit
+        # Account for spaces between words
+        for word in words:
+            # +1 for the space that will be added between words
+            if current_length + len(word) + 1 <= MAX_QUERY_LENGTH:
+                processed_query.append(word)
+                current_length += len(word) + 1
+            else:
+                break
+            
+        return ' '.join(processed_query)
+    
+    def find_papers_by_str(self, query, N=20):
+        processed_query = self._process_query(query)
+        max_retries = 3
+        retry_count = 0
+        
+        while retry_count < max_retries:
+            try:
+                search = arxiv.Search(
+                    query="abs:" + processed_query,
+                    max_results=N,
+                    sort_by=arxiv.SortCriterion.Relevance)
+
+                paper_sums = list()
+                # `results` is a generator; you can iterate over its elements one by one...
+                for r in self.sch_engine.results(search):
+                    paperid = r.pdf_url.split("/")[-1]
+                    pubdate = str(r.published).split(" ")[0]
+                    paper_sum = f"Title: {r.title}\n"
+                    paper_sum += f"Summary: {r.summary}\n"
+                    paper_sum += f"Publication Date: {pubdate}\n"
+                    #paper_sum += f"Categories: {' '.join(r.categories)}\n"
+                    paper_sum += f"arXiv paper ID: {paperid}\n"
+                    paper_sums.append(paper_sum)
+                time.sleep(2.0)
+                return "\n".join(paper_sums)
+                
+            except Exception as e:
+                retry_count += 1
+                if retry_count < max_retries:
+                    time.sleep(2 * retry_count)
+                    continue
+        return None
+
+    def retrieve_full_paper_text(self, query, MAX_LEN=50000):
+        pdf_text = str()
+        paper = next(arxiv.Client().results(arxiv.Search(id_list=[query])))
+        # Download the PDF to the PWD with a custom filename.
+        paper.download_pdf(filename="downloaded-paper.pdf")
+        # creating a pdf reader object
+        reader = PdfReader('downloaded-paper.pdf')
+        # Iterate over all the pages
+        for page_number, page in enumerate(reader.pages, start=1):
+            # Extract text from the page
+            try:
+                text = page.extract_text()
+            except Exception as e:
+                os.remove("downloaded-paper.pdf")
+                time.sleep(2.0)
+                return "EXTRACTION FAILED"
+
+            # Do something with the text (e.g., print it)
+            pdf_text += f"--- Page {page_number} ---"
+            pdf_text += text
+            pdf_text += "\n"
+        os.remove("downloaded-paper.pdf")
+        time.sleep(2.0)
+        return pdf_text[:MAX_LEN]
+
+
+# Set the non-interactive backend early in the module
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+
+def worker_run_code(code_str, output_queue):
+    output_capture = io.StringIO()
+    sys.stdout = output_capture
+    try:
+        # Create a globals dictionary with __name__ set to "__main__"
+        globals_dict = {"__name__": "__main__"}
+        exec(code_str, globals_dict)
+    except Exception as e:
+        output_capture.write(f"[CODE EXECUTION ERROR]: {str(e)}\n")
+        traceback.print_exc(file=output_capture)
+    finally:
+        sys.stdout = sys.__stdout__
+    output_queue.put(output_capture.getvalue())
+
+def execute_code(code_str, timeout=600, MAX_LEN=1000):
+    #code_str = code_str.replace("\\n", "\n")
+    code_str = "from utils import *\n" + code_str
+    if "load_dataset('pubmed" in code_str:
+        return "[CODE EXECUTION ERROR] pubmed Download took way too long. Program terminated"
+    if "exit(" in code_str:
+        return "[CODE EXECUTION ERROR] The exit() command is not allowed you must remove this."
+    output_queue = multiprocessing.Queue()
+    proc = multiprocessing.Process(target=worker_run_code, args=(code_str, output_queue))
+    proc.start()
+    proc.join(timeout)
+    if proc.is_alive():
+        proc.terminate()  # Forcefully kill the process
+        proc.join()
+        return (f"[CODE EXECUTION ERROR]: Code execution exceeded the timeout limit of {timeout} seconds. "
+                "You must reduce the time complexity of your code.")
+    else:
+        if not output_queue.empty(): output = output_queue.get()
+        else: output = ""
+        return output
+
+
+
+================================================
+FILE: utils.py
+================================================
+import os, re
+import shutil
+import time
+import tiktoken, openai
+import subprocess, string
+from openai import OpenAI
+import google.generativeai as genai
+from huggingface_hub import InferenceClient
+
+
+def query_deepseekv3(prompt, system, api_key, attempt=0, temperature=0.0):
+    try:
+        client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
+        response = client.chat.completions.create(
+            model="deepseek-chat",
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": prompt},
+            ],
+            stream=False, temperature=temperature,
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        print(f"Query qwen error: {e}")
+        if attempt >= 10: return f"Your attempt to query deepseekv3 failed: {e}"
+        return query_deepseekv3(prompt, system, attempt+1)
+
+
+def query_qwen(prompt, system, api_key, attempt=0, temperature=0.0):
+    try:
+        client = InferenceClient(api_key=api_key)
+        if system is not None:
+            messages = [
+                {"role": "system", "content": system},
+                {"role": "user", "content": prompt}]
+        else:
+            messages = [
+                {"role": "user", "content": prompt}]
+
+        completion = client.chat.completions.create(
+            model="Qwen/QwQ-32B",
+            messages=messages,
+            max_tokens=500,
+            temperature=temperature
+        )
+        return completion.choices[0].message.content.strip()
+    except Exception as e:
+        print(f"Query qwen error: {e}")
+        if attempt >= 10: return f"Your attempt to inference gemini failed: {e}"
+        return query_qwen(prompt, system, attempt+1)
+
+
+def query_gpt4omini(prompt, system, api_key, attempt=0, temperature=0.0):
+    try:
+        openai_api_key = api_key
+        openai.api_key = openai_api_key
+        os.environ["OPENAI_API_KEY"] = openai_api_key
+        if system is not None:
+            messages = [
+                {"role": "system", "content": system},
+                {"role": "user", "content": prompt}]
+        else:
+            messages = [
+                {"role": "user", "content": prompt}]
+        client = OpenAI()
+        response = client.chat.completions.create(
+            model="gpt-4o-mini", messages=messages, temperature=temperature).choices[0].message.content.strip()
+        return response
+    except Exception as e:
+        print(f"Query 4o-mini error: {e}")
+        if attempt >= 10: return f"Your attempt to inference gemini failed: {e}"
+        return query_gpt4omini(prompt, system, attempt+1)
+
+
+
+def query_gpt4o(prompt, system, api_key, attempt=0, temperature=0.0):
+    try:
+        openai_api_key = api_key
+        openai.api_key = openai_api_key
+        os.environ["OPENAI_API_KEY"] = openai_api_key
+        if system is not None:
+            messages = [
+                {"role": "user", "content":system + prompt}]
+        else:
+            messages = [
+                {"role": "user", "content": prompt}]
+        client = OpenAI()
+        response = client.chat.completions.create(
+            model="gpt-4o", messages=messages, temperature=temperature).choices[0].message.content.strip()
+        return response
+    except Exception as e:
+        print(f"Query gpr-4o error: {e}")
+        if attempt >= 10: return f"Your attempt to inference gemini failed: {e}"
+        return query_gpt4o(prompt, system, attempt+1)
+
+
+
+def query_gemini(prompt, system, api_key, attempt=0, temperature=0.0):
+    try:
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel(model_name="gemini-1.5-pro", system_instruction=system)
+        response = model.generate_content(prompt, generation_config=genai.types.GenerationConfig(temperature=temperature)).text.strip()
+        time.sleep(1)
+        return response
+    except Exception as e:
+        print(f"Gemini error: {e}")
+        if attempt >= 10: return f"Your attempt to inference gemini failed: {e}"
+        time.sleep(1)
+        return query_gemini(prompt, system, attempt+1)
+
+
+
+def query_gemini2p0(prompt, system, api_key, attempt=0, temperature=0.0,):
+    try:
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel(model_name="gemini-2.0-flash", system_instruction=system)
+        response = model.generate_content(prompt, generation_config=genai.types.GenerationConfig(temperature=temperature)).text.strip()
+        time.sleep(1)
+        return response
+    except Exception as e:
+        print(f"Gemini error: {e}")
+        if attempt >= 10: return f"Your attempt to inference gemini failed: {e}"
+        time.sleep(1)
+        return query_gemini2p0(prompt, system, attempt+1)
+
+
+def compile_latex(latex_code, output_path, compile=True, timeout=30):
+    latex_code = latex_code.replace(
+        r"\documentclass{article}",
+        "\\documentclass{article}\n\\usepackage{amsmath}\n\\usepackage{amssymb}\n\\usepackage{array}\n\\usepackage{algorithm}\n\\usepackage{algorithmicx}\n\\usepackage{algpseudocode}\n\\usepackage{booktabs}\n\\usepackage{colortbl}\n\\usepackage{color}\n\\usepackage{enumitem}\n\\usepackage{fontawesome5}\n\\usepackage{float}\n\\usepackage{graphicx}\n\\usepackage{hyperref}\n\\usepackage{listings}\n\\usepackage{makecell}\n\\usepackage{multicol}\n\\usepackage{multirow}\n\\usepackage{pgffor}\n\\usepackage{pifont}\n\\usepackage{soul}\n\\usepackage{sidecap}\n\\usepackage{subcaption}\n\\usepackage{titletoc}\n\\usepackage[symbol]{footmisc}\n\\usepackage{url}\n\\usepackage{wrapfig}\n\\usepackage{xcolor}\n\\usepackage{xspace}")
+    #print(latex_code)
+    dir_path = f"{output_path}/tex"
+    tex_file_path = os.path.join(dir_path, "temp.tex")
+    # Write the LaTeX code to the .tex file in the specified directory
+    with open(tex_file_path, "w") as f:
+        f.write(latex_code)
+
+    if not compile:
+        return f"Compilation successful"
+
+    # Compiling the LaTeX code using pdflatex with non-interactive mode and timeout
+    try:
+        result = subprocess.run(
+            ["pdflatex", "-interaction=nonstopmode", "temp.tex"],
+            check=True,                   # Raises a CalledProcessError on non-zero exit codes
+            stdout=subprocess.PIPE,        # Capture standard output
+            stderr=subprocess.PIPE,        # Capture standard error
+            timeout=timeout,               # Timeout for the process
+            cwd=dir_path
+        )
+
+        # If compilation is successful, return the success message
+        return f"Compilation successful: {result.stdout.decode('utf-8')}"
+
+    except subprocess.TimeoutExpired:
+        # If the compilation takes too long, return a timeout message
+        return "[CODE EXECUTION ERROR]: Compilation timed out after {} seconds".format(timeout)
+    except subprocess.CalledProcessError as e:
+        # If there is an error during LaTeX compilation, return the error message
+        return f"[CODE EXECUTION ERROR]: Compilation failed. There was an error in your latex."
+
+
+def count_tokens(messages, model="gpt-4"):
+    enc = tiktoken.encoding_for_model(model)
+    num_tokens = sum([len(enc.encode(message["content"])) for message in messages])
+    return num_tokens
+
+def remove_figures():
+    """Remove a directory if it exists."""
+    for _file in os.listdir("."):
+        if "Figure_" in _file and ".png" in _file:
+            os.remove(_file)
+
+def remove_directory(dir_path):
+    """Remove a directory if it exists."""
+    if os.path.exists(dir_path) and os.path.isdir(dir_path):
+        try:
+            shutil.rmtree(dir_path)
+            print(f"Directory {dir_path} removed successfully.")
+        except Exception as e:
+            print(f"Error removing directory {dir_path}: {e}")
+    else:
+        print(f"Directory {dir_path} does not exist or is not a directory.")
+
+
+def save_to_file(location, filename, data):
+    """Utility function to save data as plain text."""
+    filepath = os.path.join(location, filename)
+    try:
+        with open(filepath, 'w') as f:
+            f.write(data)  # Write the raw string instead of using json.dump
+        print(f"Data successfully saved to {filepath}")
+    except Exception as e:
+        print(f"Error saving file {filename}: {e}")
+
+
+def clip_tokens(messages, model="gpt-4", max_tokens=100000):
+    enc = tiktoken.encoding_for_model(model)
+    total_tokens = sum([len(enc.encode(message["content"])) for message in messages])
+
+    if total_tokens <= max_tokens:
+        return messages  # No need to clip if under the limit
+
+    # Start removing tokens from the beginning
+    tokenized_messages = []
+    for message in messages:
+        tokenized_content = enc.encode(message["content"])
+        tokenized_messages.append({"role": message["role"], "content": tokenized_content})
+
+    # Flatten all tokens
+    all_tokens = [token for message in tokenized_messages for token in message["content"]]
+
+    # Remove tokens from the beginning
+    clipped_tokens = all_tokens[total_tokens - max_tokens:]
+
+    # Rebuild the clipped messages
+    clipped_messages = []
+    current_idx = 0
+    for message in tokenized_messages:
+        message_token_count = len(message["content"])
+        if current_idx + message_token_count > len(clipped_tokens):
+            clipped_message_content = clipped_tokens[current_idx:]
+            clipped_message = enc.decode(clipped_message_content)
+            clipped_messages.append({"role": message["role"], "content": clipped_message})
+            break
+        else:
+            clipped_message_content = clipped_tokens[current_idx:current_idx + message_token_count]
+            clipped_message = enc.decode(clipped_message_content)
+            clipped_messages.append({"role": message["role"], "content": clipped_message})
+            current_idx += message_token_count
+    return clipped_messages
+
+
+
+def extract_prompt(text, word):
+    code_block_pattern = rf"```{word}(.*?)```"
+    code_blocks = re.findall(code_block_pattern, text, re.DOTALL)
+    extracted_code = "\n".join(code_blocks).strip()
+    return extracted_code
+
+from typing import Dict, List
+
+import datasets
+
+
+def process_docs(dataset: datasets.Dataset) -> datasets.Dataset:
+    def _process_doc(doc: dict) -> dict:
+        out_doc = {
+            "problem": doc["problem"],
+            "solution": doc["solution"],
+            "answer": remove_boxed(last_boxed_only_string(doc["solution"])),
+        }
+        return out_doc
+
+    return dataset.map(_process_doc)
+
+
+def process_results(doc: dict, results: List[str]) -> Dict[str, int]:
+    retval = 0
+    indices = [pos for pos, char in enumerate(results[0]) if char == "$"]
+    if len(indices) <= 1:
+        answer = results[0]
+    else:
+        answer = results[0][indices[0] + 1 : indices[-1]]
+
+    if is_equiv(answer, remove_boxed(last_boxed_only_string(doc["solution"]))):
+        retval = 1
+
+    results = {
+        "exact_match": retval,
+    }
+    return results
+
+
+# string normalization from https://github.com/EleutherAI/lm-evaluation-harness/blob/master/lm_eval/tasks/hendrycks_math.py
+def is_equiv(str1, str2, verbose=False):
+    if str1 is None and str2 is None:
+        print("WARNING: Both None")
+        return True
+    if str1 is None or str2 is None:
+        return False
+
+    try:
+        ss1 = strip_string(str1)
+        ss2 = strip_string(str2)
+        if verbose:
+            print(ss1, ss2)
+        return ss1 == ss2
+    except Exception:
+        return str1 == str2
+
+
+def clean_answer(s):
+    s = s.replace("\\dfrac", "\\frac") # makes no difference but can lead to errors
+    s = s.replace("x \\in", "")
+    return s
+
+def remove_boxed(s):
+    if "\\boxed " in s:
+        left = "\\boxed "
+        assert s[: len(left)] == left
+        return s[len(left) :]
+
+    left = "\\boxed{"
+
+    assert s[: len(left)] == left
+    assert s[-1] == "}"
+
+    return clean_answer(s[len(left) : -1])
+
+
+def last_boxed_only_string(string):
+    idx = string.rfind("\\boxed")
+    if "\\boxed " in string:
+        return "\\boxed " + string.split("\\boxed ")[-1].split("$")[0]
+    if idx < 0:
+        idx = string.rfind("\\fbox")
+        if idx < 0:
+            return None
+
+    i = idx
+    right_brace_idx = None
+    num_left_braces_open = 0
+    while i < len(string):
+        if string[i] == "{":
+            num_left_braces_open += 1
+        if string[i] == "}":
+            num_left_braces_open -= 1
+            if num_left_braces_open == 0:
+                right_brace_idx = i
+                break
+        i += 1
+
+    if right_brace_idx is None:
+        retval = None
+    else:
+        retval = string[idx : right_brace_idx + 1]
+
+    return retval
+
+
+def fix_fracs(string):
+    substrs = string.split("\\frac")
+    new_str = substrs[0]
+    if len(substrs) > 1:
+        substrs = substrs[1:]
+        for substr in substrs:
+            new_str += "\\frac"
+            if substr[0] == "{":
+                new_str += substr
+            else:
+                try:
+                    assert len(substr) >= 2
+                except AssertionError:
+                    return string
+                a = substr[0]
+                b = substr[1]
+                if b != "{":
+                    if len(substr) > 2:
+                        post_substr = substr[2:]
+                        new_str += "{" + a + "}{" + b + "}" + post_substr
+                    else:
+                        new_str += "{" + a + "}{" + b + "}"
+                else:
+                    if len(substr) > 2:
+                        post_substr = substr[2:]
+                        new_str += "{" + a + "}" + b + post_substr
+                    else:
+                        new_str += "{" + a + "}" + b
+    string = new_str
+    return string
+
+
+def fix_a_slash_b(string):
+    if len(string.split("/")) != 2:
+        return string
+    a = string.split("/")[0]
+    b = string.split("/")[1]
+    try:
+        a = int(a)
+        b = int(b)
+        assert string == "{}/{}".format(a, b)
+        new_string = "\\frac{" + str(a) + "}{" + str(b) + "}"
+        return new_string
+    except AssertionError:
+        return string
+
+
+def remove_right_units(string):
+    # "\\text{ " only ever occurs (at least in the val set) when describing units
+    if "\\text{ " in string:
+        splits = string.split("\\text{ ")
+        assert len(splits) == 2
+        return splits[0]
+    else:
+        return string
+
+
+def fix_sqrt(string):
+    if "\\sqrt" not in string:
+        return string
+    splits = string.split("\\sqrt")
+    new_string = splits[0]
+    for split in splits[1:]:
+        if split[0] != "{":
+            a = split[0]
+            new_substr = "\\sqrt{" + a + "}" + split[1:]
+        else:
+            new_substr = "\\sqrt" + split
+        new_string += new_substr
+    return new_string
+
+
+def strip_string(string):
+    # linebreaks
+    string = string.replace("\n", "")
+
+    # remove inverse spaces
+    string = string.replace("\\!", "")
+
+    # replace \\ with \
+    string = string.replace("\\\\", "\\")
+
+    # replace tfrac and dfrac with frac
+    string = string.replace("tfrac", "frac")
+    string = string.replace("dfrac", "frac")
+
+    # remove \left and \right
+    string = string.replace("\\left", "")
+    string = string.replace("\\right", "")
+
+    # Remove circ (degrees)
+    string = string.replace("^{\\circ}", "")
+    string = string.replace("^\\circ", "")
+
+    # remove dollar signs
+    string = string.replace("\\$", "")
+
+    # remove units (on the right)
+    string = remove_right_units(string)
+
+    # remove percentage
+    string = string.replace("\\%", "")
+    string = string.replace("\%", "")  # noqa: W605
+
+    # " 0." equivalent to " ." and "{0." equivalent to "{." Alternatively, add "0" if "." is the start of the string
+    string = string.replace(" .", " 0.")
+    string = string.replace("{.", "{0.")
+    # if empty, return empty string
+    if len(string) == 0:
+        return string
+    if string[0] == ".":
+        string = "0" + string
+
+    # to consider: get rid of e.g. "k = " or "q = " at beginning
+    if len(string.split("=")) == 2:
+        if len(string.split("=")[0]) <= 2:
+            string = string.split("=")[1]
+
+    # fix sqrt3 --> sqrt{3}
+    string = fix_sqrt(string)
+
+    # remove spaces
+    string = string.replace(" ", "")
+
+    # \frac1b or \frac12 --> \frac{1}{b} and \frac{1}{2}, etc. Even works with \frac1{72} (but not \frac{72}1). Also does a/b --> \\frac{a}{b}
+    string = fix_fracs(string)
+
+    # manually change 0.5 --> \frac{1}{2}
+    if string == "0.5":
+        string = "\\frac{1}{2}"
+    if string == "5.5":
+        string = "\\frac{11}{2}"
+    if "(x - 3)(x + 3)" in string:
+        string = string.replace("(x - 3)(x + 3)", "(x+3)(x-3)")
+
+    # NOTE: X/Y changed to \frac{X}{Y} in dataset, but in simple cases fix in case the model output is X/Y
+    string = fix_a_slash_b(string)
+
+    return string
+
+
+
+================================================
+FILE: experiment_configs/MATH_agentlab.yaml
+================================================
+# If you want to have user input or be a human-in-the-loop
+copilot-mode: True
+
+# Here is the research prompt. If num-papers-to-write > 1, you can treat this as a "research direction" otherwise it can be *very* specific and can be treated as a full research idea
+research-topic: "Your goal is to design reasoning and prompt engineering techniques to maximize accuracy on the entire 500 test questions of MATH500 benchmark. Your idea should be very novel."
+
+# Here you can put your OpenAI API key--if you don't have one or OpenAI doesn't work for you, you can also instead use `deepseek-api-key`
+api-key: "OPENAI-API-KEY-HERE"
+# or deepseek-api-key: "DEEPSEEK-API-KEY-HERE"
+# Agent Laboratory backend
+llm-backend: "o3-mini"
+# Literature review backend
+lit-review-backend: "o3-mini"
+
+# Base language
+language: "English"
+
+# Number of arxiv papers to lit review
+num-papers-lit-review: 5
+# Total number of papers to write in sequence
+num-papers-to-write: 1
+# Do you want to run multiple agent labs in parallel?
+parallel-labs: False
+
+# Total mle-solver steps per lab
+mlesolver-max-steps: 3
+# Total paper-solver steps per lab
+papersolver-max-steps: 1
+# The lab index for this lab (used for parallel runs)
+lab-index: 1
+# If you want to load an existing save
+load-existing: False
+# If fail, run exception?
+except-if-fail: False
+# Compile latex into PDFs during paper-solver
+compile-latex: False
+
+# Task notes
+task-notes:
+  plan-formulation:
+    - 'You should come up with a plan for only ONE experiment aimed at maximizing performance on the test set of MATH using prompting techniques.'
+    - 'The baseline performance of gpt-4o-mini on MATH-500 is 70.2%'
+    - 'Please use gpt-4o-mini for your experiments'
+    - 'You must evaluate on the entire 500 test questions of MATH'
+    - 'Your plan should be a novel prompting technique'
+    - 'Your evalution shound aim to get state-of-the-art performance on the MATH dataset using prompt a novel prompting idea'
+    - "DO NOT PLAN FOR TOO LONG. Submit your plan soon."
+  data-preparation:
+    - 'Please use gpt-4o-mini for your experiments'
+    - 'You must evaluate on the entire 500 test questions of MATH'
+    - 'Here is a sample code you can use to load MATH\nfrom datasets import load_dataset\nMATH_test_set = load_dataset("HuggingFaceH4/MATH-500")["test"]'
+  running-experiments:
+    - "For all strings you instantiate you must use triple quotes (''')"
+    - 'Please use gpt-4o-mini for your experiments'
+    - 'Do not try to obtain baseline accuracy or any comparison points. The baseline performance of gpt-4o-mini on MATH-500 is 70.2%'
+    - 'You can just use the query_gpt4omini(prompt=prompt, system=system_prompt) to prompt gpt-4o-mini. You can also access temperature by setting the temperature value query_gpt4omini(prompt=prompt, system=system_prompt, temperature=0.5) for example.'
+    - 'You must evaluate on the entire 500 test questions of MATH-500'
+    - "You should come up with a plan for ONE experiment aimed at maximizing performance on MATH using prompting techniques"
+    - "Make sure to use is_equiv() to evaluate if two answers are equivalent."
+    - 'Use the following code to inference gpt-4o-mini\nresponse = query_gpt4omini(prompt=prompt, system=system_prompt)'
+    - "Your code should parallelize inference. Make sure to write parallelized code."
+    - "YOU MUST MAKE YOUR CODE PARALLELIZED."
+    - "Create very thoughtful figures, that would make a good research study."
+    - 'You have access to only gpt-4o-mini'
+    - 'Here is some sample code to evaluate on MATH:\nimport multiprocessing\nimport concurrent.futures\nfrom datasets import load_dataset\n\ndef process_example(example):\n    problem = example["problem"]\n    solution = example["solution"]\n    true_answer = remove_boxed(last_boxed_only_string(solution))\n    prompt = f"""Solve the following math problem and provide your final answer enclosed in a LaTeX \\boxed{{...}} command.\n\nProblem: {problem}\n\nFinal Answer:"""\n    response = query_gpt4omini(prompt=prompt, system="You are a skilled mathematician.")\n    llm_answer = remove_boxed(last_boxed_only_string(response))\n    correct = is_equiv(llm_answer, true_answer)\n    return llm_answer, true_answer, correct\n\ndef main():\n    math_test_set = load_dataset("HuggingFaceH4/MATH-500")["test"]\n    total, correct_count = 0, 0\n    max_workers = multiprocessing.cpu_count()\n    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:\n        futures = [executor.submit(process_example, example) for example in math_test_set]\n        for future in concurrent.futures.as_completed(futures):\n            try: llm_answer, true_answer, correct = future.result()\n            except Exception: continue\n            total += 1\n            if correct: correct_count += 1\n            print(f"Step: {total}, LLM answer: {llm_answer}, True answer: {true_answer}, Accuracy: {(correct_count / total) * 100:.2f}%")\n    print(f"Complete, final accuracy: {(correct_count / total) * 100:.2f}%")\n\nif __name__ == "__main__":\n    main()'
+    - 'Generate figures with very colorful and artistic design'
+  results-interpretation:
+    - 'The baseline performance of gpt-4o-mini on MATH-500 is 70.2%'
+  report-writing:
+    - 'The baseline performance of gpt-4o-mini on MATH-500 is 70.2%'
+
+
+================================================
+FILE: experiment_configs/MATH_agentrxiv.yaml
+================================================
+# If you want to have user input or be a human-in-the-loop
+copilot-mode: False
+
+# Here is the research prompt. If num-papers-to-write > 1, you can treat this as a "research direction" otherwise it can be *very* specific and can be treated as a full research idea
+research-topic: "Your goal is to design reasoning and prompt engineering techniques to maximize accuracy on the entire 500 test questions of MATH500 benchmark. Your idea should be very novel."
+
+# Here you can put your OpenAI API key--if you don't have one or OpenAI doesn't work for you, you can also instead use `deepseek-api-key`
+api-key: "OPENAI-API-KEY-HERE"
+# or deepseek-api-key: "DEEPSEEK-API-KEY-HERE"
+# Agent Laboratory backend
+llm-backend: "o3-mini"
+# Literature review backend
+lit-review-backend: "o3-mini"
+
+# Base language
+language: "English"
+
+# Number of arxiv papers to lit review
+num-papers-lit-review: 5
+# Number of agentRxiv papers to lit review
+agentrxiv-papers: 5
+# Total number of papers to write in sequence
+num-papers-to-write: 40
+# Do you want to run multiple agent labs in parallel?
+parallel-labs: False
+
+# Total mle-solver steps per lab
+mlesolver-max-steps: 3
+# Total paper-solver steps per lab
+papersolver-max-steps: 1
+# The lab index for this lab (used for parallel runs)
+lab-index: 1
+# If you want to load an existing save
+load-existing: False
+# If fail, run exception?
+except-if-fail: False
+# Compile latex into PDFs during paper-solver
+compile-latex: False
+
+# Task notes
+task-notes:
+  plan-formulation:
+    - 'You should come up with a plan for only ONE experiment aimed at maximizing performance on the test set of MATH using prompting techniques.'
+    - 'The baseline performance of gpt-4o-mini on MATH-500 is 70.2%'
+    - 'Please use gpt-4o-mini for your experiments'
+    - 'You must evaluate on the entire 500 test questions of MATH'
+    - 'Your plan should be a novel prompting technique'
+    - 'Your evalution shound aim to get state-of-the-art performance on the MATH dataset using prompt a novel prompting idea'
+    - "DO NOT PLAN FOR TOO LONG. Submit your plan soon."
+  data-preparation:
+    - 'Please use gpt-4o-mini for your experiments'
+    - 'You must evaluate on the entire 500 test questions of MATH'
+    - 'Here is a sample code you can use to load MATH\nfrom datasets import load_dataset\nMATH_test_set = load_dataset("HuggingFaceH4/MATH-500")["test"]'
+  running-experiments:
+    - "For all strings you instantiate you must use triple quotes (''')"
+    - 'Please use gpt-4o-mini for your experiments'
+    - 'Do not try to obtain baseline accuracy or any comparison points. The baseline performance of gpt-4o-mini on MATH-500 is 70.2%'
+    - 'You can just use the query_gpt4omini(prompt=prompt, system=system_prompt) to prompt gpt-4o-mini. You can also access temperature by setting the temperature value query_gpt4omini(prompt=prompt, system=system_prompt, temperature=0.5) for example.'
+    - 'You must evaluate on the entire 500 test questions of MATH-500'
+    - "You should come up with a plan for ONE experiment aimed at maximizing performance on MATH using prompting techniques"
+    - "Make sure to use is_equiv() to evaluate if two answers are equivalent."
+    - 'Use the following code to inference gpt-4o-mini\nresponse = query_gpt4omini(prompt=prompt, system=system_prompt)'
+    - "Your code should parallelize inference. Make sure to write parallelized code."
+    - "YOU MUST MAKE YOUR CODE PARALLELIZED."
+    - "Create very thoughtful figures, that would make a good research study."
+    - 'You have access to only gpt-4o-mini'
+    - 'Here is some sample code to evaluate on MATH:\nimport multiprocessing\nimport concurrent.futures\nfrom datasets import load_dataset\n\ndef process_example(example):\n    problem = example["problem"]\n    solution = example["solution"]\n    true_answer = remove_boxed(last_boxed_only_string(solution))\n    prompt = f"""Solve the following math problem and provide your final answer enclosed in a LaTeX \\boxed{{...}} command.\n\nProblem: {problem}\n\nFinal Answer:"""\n    response = query_gpt4omini(prompt=prompt, system="You are a skilled mathematician.")\n    llm_answer = remove_boxed(last_boxed_only_string(response))\n    correct = is_equiv(llm_answer, true_answer)\n    return llm_answer, true_answer, correct\n\ndef main():\n    math_test_set = load_dataset("HuggingFaceH4/MATH-500")["test"]\n    total, correct_count = 0, 0\n    max_workers = multiprocessing.cpu_count()\n    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:\n        futures = [executor.submit(process_example, example) for example in math_test_set]\n        for future in concurrent.futures.as_completed(futures):\n            try: llm_answer, true_answer, correct = future.result()\n            except Exception: continue\n            total += 1\n            if correct: correct_count += 1\n            print(f"Step: {total}, LLM answer: {llm_answer}, True answer: {true_answer}, Accuracy: {(correct_count / total) * 100:.2f}%")\n    print(f"Complete, final accuracy: {(correct_count / total) * 100:.2f}%")\n\nif __name__ == "__main__":\n    main()'
+    - 'Generate figures with very colorful and artistic design'
+  results-interpretation:
+    - 'The baseline performance of gpt-4o-mini on MATH-500 is 70.2%'
+  report-writing:
+    - 'The baseline performance of gpt-4o-mini on MATH-500 is 70.2%'
+
