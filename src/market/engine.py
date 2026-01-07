@@ -1,3 +1,17 @@
+"""
+Market Engine (Facade).
+
+This module serves as the central controller for the market simulation.
+It follows the **Facade Pattern**, providing a simplified interface to the 
+complex underlying subsystems: the OrderBook (matching) and the Ledger (persistence).
+
+Responsibilities:
+1. Maintain the current state of the market (Last Price).
+2. Route agent actions to the Order Book.
+3. Record successful trades in the Ledger.
+4. Expose market state to agents.
+"""
+
 from typing import List, Any, Dict, Optional
 from datetime import datetime
 
@@ -6,12 +20,35 @@ from .order_book import OrderBook
 from .schema import Transaction, AgentAction, MarketState
 
 class MarketEngine:
+    """
+    The main engine driving the market logic.
+    
+    Attributes:
+        ledger (Ledger): Handle to the database.
+        order_book (OrderBook): Handle to the in-memory matching engine.
+        last_price (float): The price of the most recent execution. Used as the "current market price".
+    """
+
     def __init__(self, db_path: str = "market.db"):
+        """
+        Initialize the market engine.
+        
+        Args:
+            db_path (str): Path to the SQLite database file.
+        """
         self.ledger = Ledger(db_path)
         self.order_book = OrderBook()
-        self.last_price = 0.0
+        self.last_price = 0.0 # Initialize at 0, or could be a seed price
 
     def get_state(self) -> MarketState:
+        """
+        Constructs and returns the current state of the market.
+        
+        This is the "sensor" data provided to agents.
+        
+        Returns:
+            MarketState: Object containing price and order book summary.
+        """
         summary = self.order_book.get_summary()
         return MarketState(
             current_price=self.last_price,
@@ -20,20 +57,38 @@ class MarketEngine:
 
     def process_action(self, agent_id: str, action: AgentAction, item: str = "apple", price: float = 0.0) -> Optional[Transaction]:
         """
-        Process a single agent action.
-        Returns a Transaction if a trade occurred, else None.
+        Processes an action submitted by an agent.
+        
+        This is the primary "write" operation of the API.
+        
+        Args:
+            agent_id (str): ID of the agent acting.
+            action (AgentAction): The type of action (BUY, SELL, HOLD).
+            item (str): The asset involved (default "apple").
+            price (float): The limit price for the order.
+            
+        Returns:
+            Optional[Transaction]: The resulting transaction if a trade occurred, else None.
         """
+        transaction = None
+        
+        # Route action to the appropriate OrderBook method
         if action == AgentAction.BUY:
             transaction = self.order_book.add_buy(agent_id, item, price)
         elif action == AgentAction.SELL:
             transaction = self.order_book.add_sell(agent_id, item, price)
         else:
-            # HOLD or REFLECTION
+            # HOLD or REFLECTION actions have no market impact
             return None
 
+        # If the order resulted in a trade
         if transaction:
+            # 1. Persist to DB
             self.ledger.record_transaction(transaction)
+            
+            # 2. Update Market State
             self.last_price = transaction.price
+            
             return transaction
         
         return None

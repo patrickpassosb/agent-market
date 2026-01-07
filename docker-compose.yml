@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  agent-market:
+    # Build context is the current directory
+    build: .
+    
+    # Load environment variables (API keys) from .env file
+    env_file:
+      - .env
+    
+    # Volume Mounts for Development Experience
+    volumes:
+      # 1. Mount source code: allows live editing without rebuilding
+      - .:/app
+      # 2. Mount anonymous volume for .venv: prevents local host's venv from conflicting with container's venv
+      - /app/.venv
+    
+    # Interactive Mode Support
+    # Required for 'rich' CLI dashboard to render correctly
+    tty: true
+    stdin_open: true
+    
+    # Logging
+    # Logs will be accessible via `docker logs -f agent-market`

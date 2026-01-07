@@ -1,3 +1,10 @@
+"""
+Agent Personas.
+
+This module defines the diverse set of personalities/strategies assigned to agents.
+Using a predefined list ensures a heterogeneous market environment with conflicting interests,
+which is necessary for liquidity and price discovery.
+"""
 
 PERSONAS = [
     "A conservative long-term investor who only buys when prices are historically low and holds for long periods.",

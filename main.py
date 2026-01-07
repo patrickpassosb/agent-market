@@ -1,6 +1,22 @@
+"""
+Agent Market Simulation Entry Point.
+
+This script orchestrates the entire simulation. It is responsible for:
+1. **Setup**: initializing the Market Engine and populating the world with Agents.
+2. **Execution Loop**: driving the simulation tick-by-tick.
+3. **Visualization**: rendering the real-time TUI (Text User Interface) using `rich`.
+4. **Logging**: persisting events to disk for post-hoc analysis.
+
+Usage:
+    Run directly via Python:
+    $ uv run main.py
+"""
+
 import os
 import time
 import random
+import logging
+from datetime import datetime
 from typing import List
 from dotenv import load_dotenv
 
@@ -15,16 +31,30 @@ from src.agents.trader import Trader
 from src.market.schema import AgentAction, Transaction
 from src.utils.personas import PERSONAS
 
-# Load environment variables
+# --- Configuration ---
+
+# Load environment variables from .env file
 load_dotenv()
 
-# Simulation Settings
-NUM_AGENTS = 5  # Start small for clarity, can bump to 10
-Tick_Duration = 2.0 # Seconds per tick
+# Simulation Parameters
+NUM_AGENTS = 12       # Number of agents to spawn
+Tick_Duration = 2.0   # Minimum duration of a simulation tick (seconds)
 
 console = Console()
 
+# --- UI / Layout Functions ---
+
 def generate_layout() -> Layout:
+    """
+    Creates the main dashboard layout using Rich. 
+    
+    Structure:
+    - Header
+    - Main Body
+        - Left: Market Status (Price, Order Book)
+        - Right: Recent Activity (Agent logs)
+    - Footer
+    """
     layout = Layout()
     layout.split_column(
         Layout(name="header", size=3),
@@ -38,6 +68,12 @@ def generate_layout() -> Layout:
     return layout
 
 def create_market_table(state) -> Panel:
+    """
+    Renders the Market Status panel. 
+    
+    Args:
+        state (MarketState): Current state of the market.
+    """
     table = Table(title="Market Status")
     table.add_column("Metric", style="cyan")
     table.add_column("Value", style="magenta")
@@ -52,18 +88,28 @@ def create_market_table(state) -> Panel:
     
     return Panel(table, title="Order Book & Price")
 
-# Model Keywords
+# --- Model Selection Logic ---
+
+# Keywords used to map text personas to appropriate underlying models.
 SMART_GROQ_KEYWORDS = ["whale", "market maker"]
 GEMINI_KEYWORDS = ["value", "patient", "long-term", "conservative"]
 OPENAI_KEYWORDS = ["algorithmic", "disciplined", "contrarian"]
 
 def get_model_for_persona(persona: str) -> str:
     """
-    Assigns models based on persona characteristics:
-    - Smart/Big players -> Llama 70B (Groq)
-    - Analytical/Patient -> Gemini 1.5 Flash
-    - Structural/Rules  -> GPT-4o Mini
-    - Reactive/Fast     -> Llama 8B (Groq) - Default
+    Intelligently assigns an LLM model based on the complexity/archetype of the persona. 
+    
+    Strategy:
+    - Complex/Strategic roles -> Llama 70B (High reasoning)
+    - Analytical roles -> Gemini Flash (Long context/analytical)
+    - Strict/Rule-based roles -> GPT-4o Mini (Instruction following)
+    - Default/Reactive roles -> Llama 8B (Speed)
+    
+    Args:
+        persona (str): The agent's persona description. 
+        
+    Returns:
+        str: The model identifier string for `litellm`.
     """
     p_lower = persona.lower()
     
@@ -79,18 +125,26 @@ def get_model_for_persona(persona: str) -> str:
     return "groq/llama-3.1-8b-instant"
 
 def create_activity_table(agents: List[Trader], recent_actions: List[dict]) -> Panel:
+    """
+    Renders the Agent Activity feed. 
+    
+    Args:
+        agents (List[Trader]): List of all agents (for ID->Model lookup).
+        recent_actions (List[dict]): List of recent action logs.
+    """
     table = Table(title="Agent Activity & Decisions")
     table.add_column("Agent / Model", style="white")
     table.add_column("Action", style="bold")
     table.add_column("Details", style="dim")
     
-    # Create a quick lookup for agent models
+    # Create a quick lookup for agent models to display next to ID
     agent_models = {a.id: a.model_name for a in agents}
 
-    for act in recent_actions[-10:]: # Show last 10
+    for act in recent_actions[-10:]: # Show last 10 actions only
+        # Color coding for actions
         color = "green" if act['action'] == AgentAction.BUY else "red" if act['action'] == AgentAction.SELL else "yellow"
         
-        # Format Model Name for display
+        # Format Model Name for concise display
         model_raw = agent_models.get(act['agent_id'], "?")
         if "70b" in model_raw:
             model_display = "[bold cyan]Llama 70B[/]"
@@ -109,49 +163,68 @@ def create_activity_table(agents: List[Trader], recent_actions: List[dict]) -> P
     
     return Panel(table, title="Live Feed")
 
+# --- Main Simulation Loop ---
+
 def main():
-    # 1. Setup
+    # 1. Setup & Initialization
+    
+    # Ensure logs directory exists and setup logging
+    os.makedirs("logs", exist_ok=True)
+    log_filename = f"logs/simulation_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+    
+    # Configure global logging
+    logging.basicConfig(
+        filename=log_filename,
+        level=logging.INFO,
+        format='%(asctime)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    logging.info("Starting Agent Market Simulation")
+
+    # Initialize Market Engine
     engine = MarketEngine("market.db")
     agents: List[Trader] = []
     
-    # Select random personas
+    # Initialize Agents with random personas
     selected_personas = random.sample(PERSONAS, min(NUM_AGENTS, len(PERSONAS)))
     
     for i, persona in enumerate(selected_personas):
         agent_id = f"Agent_{i+1}"
-        # Determine model based on persona
+        # Determine appropriate LLM for this persona
         model = get_model_for_persona(persona)
         
         agent = Trader(agent_id=agent_id, persona=persona, model_name=model)
         agents.append(agent)
     
+    # Initialize UI
     layout = generate_layout()
     layout["header"].update(Panel("Agent Market Simulation - AI Traders (Hybrid Models)", style="bold blue"))
     layout["footer"].update(Panel("Press Ctrl+C to stop", style="dim"))
 
     recent_actions = []
 
-    # 2. Loop
+    # 2. Execution Loop
+    # We use rich's `Live` context manager to handle screen repainting without flickering.
     with Live(layout, refresh_per_second=4, screen=True) as live:
         tick = 0
         while True:
             tick += 1
             start_time = time.time()
             
-            # --- MARKET TICK ---
+            # --- PHASE 1: SENSE ---
+            # Agents observe the current market state
             market_state = engine.get_state()
             
-            # Shuffle agents so they act in random order (fairness)
+            # Shuffle agents so they act in random order (fairness in sequential processing)
             random.shuffle(agents)
             
-            tick_actions = []
-            
+            # --- PHASE 2: THINK & ACT ---
             for agent in agents:
-                # Agent perceives and decides
+                # Agent perceives state, retrieves memory, and decides
                 decision = agent.act(market_state)
                 
                 if decision:
-                    # Execute
+                    # Execute action against the market engine
                     tx = engine.process_action(
                         agent.id, 
                         decision["action"], 
@@ -159,7 +232,7 @@ def main():
                         decision["price"]
                     )
                     
-                    # Log result
+                    # Prepare log entry
                     log_entry = {
                         "agent_id": agent.id,
                         "action": decision["action"],
@@ -167,15 +240,19 @@ def main():
                         "reasoning": decision["reasoning"]
                     }
                     recent_actions.append(log_entry)
-                    tick_actions.append(log_entry)
                     
-                    # If trade happened, maybe log it differently? For now this is fine.
+                    # --- PHASE 3: LOG & PERSIST ---
+                    # Persist log to file
+                    logging.info(f"AGENT: {agent.id} | ACTION: {decision['action'].value} | PRICE: {decision['price']} | REASON: {decision['reasoning']}")
+                    if tx:
+                        logging.info(f"  -> TRADE EXECUTED: {tx}")
 
-            # Update UI
+            # --- PHASE 4: VISUALIZE ---
+            # Update the UI components with the new state
             layout["market_status"].update(create_market_table(engine.get_state()))
             layout["recent_activity"].update(create_activity_table(agents, recent_actions))
             
-            # Wait remainder of tick
+            # Control simulation speed
             elapsed = time.time() - start_time
             sleep_time = max(0, Tick_Duration - elapsed)
             time.sleep(sleep_time)
@@ -184,4 +261,5 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
+        # Handle manual stop gracefully
         print("\nSimulation stopped by user.")
