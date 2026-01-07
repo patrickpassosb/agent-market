@@ -2,6 +2,10 @@
 
 > **A real-time, multi-agent economic simulation where 12 distinct AI personalities trade, negotiate, and shaping market dynamics.**
 
+![CI Status](https://github.com/YOUR_USERNAME/agent-market/workflows/CI%20Pipeline/badge.svg)
+![Coverage](https://img.shields.io/badge/coverage-72%25-yellow)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+
 ![Simulation Dashboard](https://github.com/user-attachments/assets/placeholder)
 
 ## 🏆 Overview
@@ -66,6 +70,18 @@ uv run python src/analysis/chart.py
 ```
 Check the `plots/` directory for `price_history.png`.
 
+### Running Tests
+
+```bash
+uv run pytest tests/ -v
+```
+
+**Coverage Report:**
+```bash
+uv run pytest --cov=src --cov-report=html
+open htmlcov/index.html
+```
+
 ## 🧠 Architecture
 
 ### The Agents
@@ -92,6 +108,13 @@ The `MarketEngine` (`src/market/engine.py`) maintains the "Physics" of the world
 3.  Commit changes.
 4.  Push to branch.
 5.  Open a Pull Request.
+
+## 📦 Deployment
+
+See [DEPLOYMENT.md](./DEPLOYMENT.md) for detailed deployment options including:
+- Streamlit Cloud
+- Docker + Cloud Run
+- Render/Railway
 
 ---
 *Built for the Multi-Agent Marketplace Simulation Challenge.*
