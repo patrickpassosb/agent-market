@@ -58,6 +58,7 @@ def generate_layout() -> Layout:
     layout = Layout()
     layout.split_column(
         Layout(name="header", size=3),
+        Layout(name="news_flash", size=3),  # New News Ticker
         Layout(name="main", ratio=1),
         Layout(name="footer", size=3)
     )
@@ -199,21 +200,31 @@ def main():
     # Initialize UI
     layout = generate_layout()
     layout["header"].update(Panel("Agent Market Simulation - AI Traders (Hybrid Models)", style="bold blue"))
+    layout["news_flash"].update(Panel("Market Opening...", title="BREAKING NEWS", style="bold red"))
     layout["footer"].update(Panel("Press Ctrl+C to stop", style="dim"))
 
     recent_actions = []
+    
+    # Initialize Journalist
+    from src.agents.journalist import JournalistAgent
+    journalist = JournalistAgent()  # Defaults to Gemini
 
     # 2. Execution Loop
-    # We use rich's `Live` context manager to handle screen repainting without flickering.
     with Live(layout, refresh_per_second=4, screen=True) as live:
         tick = 0
         while True:
             tick += 1
             start_time = time.time()
             
-            # --- PHASE 1: SENSE ---
-            # Agents observe the current market state
+            # --- MARKET TICK ---
             market_state = engine.get_state()
+            
+            # --- JOURNALIST UPDATE ---
+            if tick % 10 == 0:
+                # Get last 20 txns for context
+                recent_txns = engine.ledger.get_transactions(limit=20)
+                news = journalist.analyze(market_state, recent_txns)
+                layout["news_flash"].update(Panel(f"[bold]{news.headline}[/bold]\n{news.body}", title="BREAKING NEWS", style="bold red"))
             
             # Shuffle agents so they act in random order (fairness in sequential processing)
             random.shuffle(agents)
