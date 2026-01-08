@@ -68,6 +68,7 @@ sequenceDiagram
 Acts as a **Facade** over the `OrderBook` and `Ledger`.
 -   **Order Book (`src/market/order_book.py`)**: Double auction with bids as a max-heap and asks as a min-heap.
 -   **Ledger (`src/market/ledger.py`)**: SQLModel persistence to `market.db`.
+-   **Negotiation (`src/market/engine.py`)**: Generates counter-offer prices using current best quotes.
 
 ### Intelligent Agents (`src/agents/trader.py`)
 
@@ -92,6 +93,16 @@ Located in `src/memory/memory.py`.
 Located in `src/market/ledger.py`.
 -   **Schema:** `Transaction` table (id, timestamp, buyer_id, seller_id, price).
 -   **Purpose:** The source of truth for the `JournalistAgent` and `chart.py` analysis.
+
+### 3. Interaction Ledger (SQLite/SQLModel)
+Located in `src/market/ledger.py` and `src/market/schema.py`.
+-   **Schema:** `InteractionLog` table (id, timestamp, agent_id, kind, action, item, price, details).
+-   **Purpose:** Persistent audit trail for agent actions and negotiation events.
+
+## Checkpoints
+
+The simulator can emit JSON checkpoints (market state, agent metrics, recent transactions/interactions)
+to support reproducibility and experiment evidence.
 
 ## Project Structure
 

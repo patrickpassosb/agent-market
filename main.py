@@ -14,6 +14,7 @@ Stop the simulation with Ctrl+C (SIGINT). The script will handle graceful shutdo
 """
 
 import os
+import argparse
 import time
 import random
 import logging
@@ -38,8 +39,9 @@ logging.getLogger("litellm").setLevel(logging.CRITICAL)
 
 from src.market.engine import MarketEngine
 from src.agents.trader import Trader
-from src.market.schema import AgentAction, Transaction, ActionLog
+from src.market.schema import AgentAction, Transaction, ActionLog, InteractionLog
 from src.utils.personas import PERSONAS, get_model_for_persona
+from src.utils.checkpoints import build_checkpoint, write_checkpoint
 
 # --- Configuration ---
 
@@ -138,10 +140,27 @@ def create_activity_table(agents: List[Trader], recent_actions: Iterable[ActionL
     
     return Panel(table, title="Live Feed")
 
+def parse_args():
+    """
+    Parse CLI args for bounded runs and checkpointing.
+    """
+    parser = argparse.ArgumentParser(
+        description="Agent Market Simulation",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )  # https://github.com/python/cpython/blob/main/Doc/library/argparse.rst (Context7 /python/cpython)
+    parser.add_argument("--max-ticks", type=int, default=0, help="Stop after N ticks (0 = run indefinitely).")
+    parser.add_argument("--checkpoint-every", type=int, default=0, help="Write a checkpoint every N ticks (0 = disabled).")
+    parser.add_argument("--checkpoint-dir", type=str, default="checkpoints", help="Directory for checkpoint JSON files.")
+    parser.add_argument("--checkpoint-transactions", type=int, default=50, help="Transactions to include in checkpoints.")
+    parser.add_argument("--checkpoint-interactions", type=int, default=100, help="Interactions to include in checkpoints.")
+    return parser.parse_args()
+
+
 # --- Main Simulation Loop ---
 
 def main():
     # 1. Setup & Initialization
+    args = parse_args()
     
     # Ensure logs directory exists and setup logging
     os.makedirs("logs", exist_ok=True)
@@ -209,6 +228,20 @@ def main():
                 decision = agent.act(market_state)
                 
                 if decision:
+                    # Negotiate a counter-offer if quotes are far from the submitted price
+                    negotiated_price, negotiation_details = engine.negotiate_price(
+                        agent_id=agent.id,
+                        action=decision["action"],
+                        item=decision["item"],
+                        price=decision["price"],
+                    )
+                    if negotiation_details:
+                        decision["price"] = negotiated_price
+                        engine.ledger.record_interaction(InteractionLog(**negotiation_details))
+                        logging.info(
+                            f"NEGOTIATION: {agent.id} | ACTION: {decision['action'].value} | PRICE: {decision['price']}"
+                        )
+
                     # Execute action against the market engine
                     # Now passes the full agent object (for portfolio access)
                     tx = engine.process_action(
@@ -230,6 +263,16 @@ def main():
                     # --- PHASE 3: LOG & PERSIST ---
                     # Persist log to file
                     logging.info(f"AGENT: {agent.id} | ACTION: {decision['action'].value} | PRICE: {decision['price']} | REASON: {decision['reasoning']}")
+                    engine.ledger.record_interaction(
+                        InteractionLog(
+                            agent_id=agent.id,
+                            kind="action",
+                            action=decision["action"].value,
+                            item=decision["item"],
+                            price=decision["price"],
+                            details=decision["reasoning"],
+                        )
+                    )
                     if tx:
                         logging.info(f"  -> TRADE EXECUTED: {tx}")
 
@@ -242,6 +285,23 @@ def main():
             elapsed = time.time() - start_time
             sleep_time = max(0, Tick_Duration - elapsed)
             time.sleep(sleep_time)
+
+            # --- CHECKPOINTS ---
+            if args.checkpoint_every and tick % args.checkpoint_every == 0:
+                payload = build_checkpoint(
+                    tick=tick,
+                    market_state=market_state,
+                    agents=agents,
+                    transactions=engine.ledger.get_transactions(limit=args.checkpoint_transactions),
+                    interactions=engine.ledger.get_interactions(limit=args.checkpoint_interactions),
+                )
+                filename = f"checkpoint_{tick:06d}.json"
+                path = write_checkpoint(payload, args.checkpoint_dir, filename)
+                logging.info(f"CHECKPOINT: {path}")
+
+            if args.max_ticks and tick >= args.max_ticks:
+                logging.info(f"Simulation completed after {tick} ticks.")
+                break
 
 if __name__ == "__main__":
     try:

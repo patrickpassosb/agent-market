@@ -28,7 +28,7 @@ This project simulates a **livestock market** (or any asset class) populated by 
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Python 3.10+
+- Python 3.12+
 - `uv` (recommended) or `pip`
 
 ### Installation
@@ -62,6 +62,13 @@ uv run python main.py
 ```
 *Press `Ctrl+C` to stop.*
 
+### Demo Guide (Bounded Run)
+
+Run a finite simulation and generate checkpoints for evidence:
+```bash
+uv run python main.py --max-ticks 200 --checkpoint-every 20
+```
+
 ### Analyzing Results
 
 After a run, generate charts:
@@ -69,6 +76,16 @@ After a run, generate charts:
 uv run python src/analysis/chart.py
 ```
 Check the `plots/` directory for `price_history.png`.
+
+### Checkpoints
+
+Checkpoint snapshots (JSON) are written to `checkpoints/` when enabled via `--checkpoint-every`.
+
+### Experiment Evidence
+
+- Logs: `logs/`
+- Plots: `plots/`
+- Checkpoints: `checkpoints/`
 
 ### Running Tests
 
@@ -146,3 +163,7 @@ Set build command to `uv sync` and start command to `uv run python main.py`, the
 
 ---
 *Built for the Multi-Agent Marketplace Simulation Challenge.*
+
+## References
+- Agent Laboratory: https://agentlaboratory.github.io/
+- Generative Agents: https://github.com/joonspk-research/generative_agents

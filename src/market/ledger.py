@@ -9,7 +9,7 @@ from typing import List, Optional
 import logging
 from sqlmodel import SQLModel, Session, create_engine, select
 import os
-from .schema import Transaction
+from .schema import Transaction, InteractionLog
 
 class Ledger:
     """
@@ -65,4 +65,22 @@ class Ledger:
         """
         with Session(self.engine) as session:
             statement = select(Transaction).order_by(Transaction.timestamp.desc()).limit(limit)
+            return list(session.exec(statement).all())
+
+    def record_interaction(self, interaction: InteractionLog) -> InteractionLog:
+        """
+        Persists a non-transaction interaction (actions, negotiations) to the database.
+        """
+        with Session(self.engine) as session:
+            session.add(interaction)
+            session.commit()
+            session.refresh(interaction)
+            return interaction
+
+    def get_interactions(self, limit: int = 100) -> List[InteractionLog]:
+        """
+        Retrieves the most recent interaction logs.
+        """
+        with Session(self.engine) as session:
+            statement = select(InteractionLog).order_by(InteractionLog.timestamp.desc()).limit(limit)
             return list(session.exec(statement).all())

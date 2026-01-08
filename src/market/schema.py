@@ -86,3 +86,22 @@ class ActionLog(BaseModel):
     action: AgentAction
     price: float
     reasoning: str
+
+class InteractionLog(SQLModel, table=True):  # https://sqlmodel.tiangolo.com/tutorial/create-db-and-table (Context7 /websites/sqlmodel_tiangolo)
+    """
+    Records non-transaction interactions (agent actions, negotiations, commentary).
+    """
+    __table_args__ = {"extend_existing": True}
+
+    id: Optional[int] = Field(default=None, primary_key=True, description="Unique Interaction ID")
+    agent_id: str = Field(index=True, description="ID of the acting agent")
+    kind: str = Field(description="Interaction category (e.g., action, negotiation)")
+    action: Optional[str] = Field(default=None, description="Action label, if applicable")
+    item: Optional[str] = Field(default=None, description="Asset identifier, if applicable")
+    price: Optional[float] = Field(default=None, description="Price associated with the interaction")
+    counterparty_id: Optional[str] = Field(default=None, description="Counterparty agent ID, if applicable")
+    details: Optional[str] = Field(default=None, description="Free-form details or notes")
+    timestamp: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        description="Time of interaction (UTC)",
+    )  # https://github.com/python/cpython/blob/main/Doc/library/datetime.rst (Context7 /python/cpython)

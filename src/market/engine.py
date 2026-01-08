@@ -135,3 +135,37 @@ class MarketEngine:
             return transaction
         
         return None
+
+    def negotiate_price(self, agent_id: str, action: AgentAction, item: str, price: float) -> tuple[float, Optional[dict]]:
+        """
+        Provides a counter-offer price based on current best quotes.
+        """
+        best_bid, best_ask = self.order_book.get_best_quotes(item)
+
+        if action == AgentAction.BUY and best_ask is not None and price < best_ask:
+            counter_price = (price + best_ask) / 2.0
+            details = {
+                "kind": "negotiation",
+                "agent_id": agent_id,
+                "counterparty_id": None,
+                "action": action.value,
+                "item": item,
+                "price": counter_price,
+                "details": f"Counter-offer between bid {price} and ask {best_ask}.",
+            }
+            return counter_price, details
+
+        if action == AgentAction.SELL and best_bid is not None and price > best_bid:
+            counter_price = (price + best_bid) / 2.0
+            details = {
+                "kind": "negotiation",
+                "agent_id": agent_id,
+                "counterparty_id": None,
+                "action": action.value,
+                "item": item,
+                "price": counter_price,
+                "details": f"Counter-offer between ask {price} and bid {best_bid}.",
+            }
+            return counter_price, details
+
+        return price, None

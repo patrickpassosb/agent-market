@@ -148,7 +148,7 @@ class OrderBook:
                     seller_id=agent_id,
                     item=item,
                     price=execution_price,
-            timestamp=datetime.now(timezone.utc)
+                    timestamp=datetime.now(timezone.utc)
                 )
         
         # No match found, add to order book as a resting order
@@ -192,3 +192,13 @@ class OrderBook:
             "bids_count": sum(len(heap) for heap in self.bids.values()),
             "asks_count": sum(len(heap) for heap in self.asks.values())
         }
+
+    def get_best_quotes(self, item: str) -> tuple[Optional[float], Optional[float]]:
+        """
+        Returns the best bid and ask for a specific item.
+        """
+        bids = self.bids.get(item, [])
+        asks = self.asks.get(item, [])
+        best_bid = -bids[0][0] if bids else None
+        best_ask = asks[0][0] if asks else None
+        return best_bid, best_ask

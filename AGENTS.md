@@ -34,7 +34,7 @@ Rules:
 
 ## 2) Mandatory Tasks (Based on `ai_task_template_skeleton.md`)
 
-For any work beyond trivial Q&A, Agent MUST operate from a task file created **from** `ai_task_template_skeleton.md`.
+For any work beyond trivial Q&A, Agent MUST operate from a task file created **from** .agent/tasks/`ai_task_template_skeleton.md`.
 
 Rules:
 
