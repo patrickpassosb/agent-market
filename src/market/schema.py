@@ -8,7 +8,7 @@ It utilizes:
 - `Pydantic` for transient data validation (MarketState).
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Dict, Any, Optional
 
@@ -54,7 +54,7 @@ class Transaction(SQLModel, table=True):
     seller_id: str = Field(index=True, description="ID of the selling agent")
     item: str = Field(description="Name of the asset traded")
     price: float = Field(description="Execution price")
-    timestamp: datetime = Field(default_factory=datetime.utcnow, description="Time of transaction (UTC)")
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="Time of transaction (UTC)")  # https://github.com/python/cpython/blob/main/Doc/library/datetime.rst (Context7 /python/cpython)
 
 class MarketState(BaseModel):
     """

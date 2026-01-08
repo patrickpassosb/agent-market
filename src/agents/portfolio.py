@@ -5,8 +5,7 @@ Tracks cash, positions, and calculates profit/loss metrics.
 """
 
 from typing import Dict
-from pydantic import BaseModel, Field
-from datetime import datetime
+from pydantic import BaseModel, Field, ConfigDict, PrivateAttr
 
 
 class Portfolio(BaseModel):
@@ -19,17 +18,15 @@ class Portfolio(BaseModel):
     - Trade history for P/L calculation
     """
     
+    model_config = ConfigDict()  # Pydantic v2 config style per https://github.com/pydantic/pydantic/blob/main/docs/concepts/config.md (Context7 /pydantic/pydantic)
+
     cash: float = Field(default=10000.0, description="Available cash balance")
     positions: Dict[str, int] = Field(default_factory=dict, description="Holdings: {item: quantity}")
     realized_pnl: float = Field(default=0.0, description="Locked-in profit/loss from closed positions")
     trades_count: int = Field(default=0, description="Total number of trades executed")
     
     # Cost basis tracking for P/L calculation
-    _cost_basis: Dict[str, float] = {}  # {item: average_cost_per_unit}
-    
-    class Config:
-        # Allow internal fields starting with _
-        underscore_attrs_are_private = True
+    _cost_basis: Dict[str, float] = PrivateAttr(default_factory=dict)  # PrivateAttr per https://github.com/pydantic/pydantic/blob/main/docs/concepts/models.md (Context7 /pydantic/pydantic)
     
     def execute_buy(self, item: str, quantity: int, price: float) -> bool:
         """

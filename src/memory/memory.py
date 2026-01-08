@@ -10,7 +10,7 @@ import chromadb
 from typing import List, Dict, Any
 import uuid
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 
 class AgentMemory:
     """
@@ -59,7 +59,7 @@ class AgentMemory:
             metadata = {}
         
         # Automatically add timestamp for temporal context
-        metadata.setdefault("timestamp", datetime.utcnow().timestamp())
+        metadata.setdefault("timestamp", datetime.now(timezone.utc).timestamp())  # https://github.com/python/cpython/blob/main/Doc/library/datetime.rst (Context7 /python/cpython)
 
         self.collection.add(
             documents=[text],

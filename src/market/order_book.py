@@ -15,7 +15,7 @@ To simulate a Max-Heap for bids, we negate the price before pushing to the heap.
 
 import heapq
 from typing import Dict, List, Tuple, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from .schema import Transaction
 
 class OrderBook:
@@ -79,7 +79,7 @@ class OrderBook:
         Returns:
             Optional[Transaction]: A Transaction object if a trade executed, otherwise None.
         """
-        timestamp = datetime.utcnow().timestamp()
+        timestamp = datetime.now(timezone.utc).timestamp()  # https://github.com/python/cpython/blob/main/Doc/library/datetime.rst (Context7 /python/cpython)
         
         # Check if we can match with existing sell orders (asks) for this item
         # Lowest ask is at asks[0] (Min-Heap Root)
@@ -126,7 +126,7 @@ class OrderBook:
         Returns:
             Optional[Transaction]: A Transaction object if a trade executed, otherwise None.
         """
-        timestamp = datetime.utcnow().timestamp()
+        timestamp = datetime.now(timezone.utc).timestamp()  # https://github.com/python/cpython/blob/main/Doc/library/datetime.rst (Context7 /python/cpython)
         
         # Check if we can match with existing buy orders (bids) for this item
         # Highest bid is at bids[0] (stored as negative value)
@@ -148,7 +148,7 @@ class OrderBook:
                     seller_id=agent_id,
                     item=item,
                     price=execution_price,
-                    timestamp=datetime.utcnow()
+            timestamp=datetime.now(timezone.utc)
                 )
         
         # No match found, add to order book as a resting order
