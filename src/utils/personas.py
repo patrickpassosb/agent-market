@@ -20,3 +20,37 @@ PERSONAS = [
     "A rumor monger who trades based on 'news' (random fluctuations) rather than price trends.",
     "A DCA (Dollar Cost Average) buyer who buys a fixed amount every tick regardless of price."
 ]
+
+# Keywords used to map text personas to appropriate underlying models.
+SMART_GROQ_KEYWORDS = ["whale", "market maker"]
+GEMINI_KEYWORDS = ["value", "patient", "long-term", "conservative"]
+OPENAI_KEYWORDS = ["algorithmic", "disciplined", "contrarian"]
+
+def get_model_for_persona(persona: str) -> str:
+    """
+    Intelligently assigns an LLM model based on the complexity/archetype of the persona. 
+    
+    Strategy:
+    - Complex/Strategic roles -> Llama 70B (High reasoning)
+    - Analytical roles -> Gemini Flash (Long context/analytical)
+    - Strict/Rule-based roles -> GPT-4o Mini (Instruction following)
+    - Default/Reactive roles -> Llama 8B (Speed)
+    
+    Args:
+        persona (str): The agent's persona description. 
+        
+    Returns:
+        str: The model identifier string for `litellm`.
+    """
+    p_lower = persona.lower()
+    
+    if any(k in p_lower for k in SMART_GROQ_KEYWORDS):
+        return "groq/llama-3.3-70b-versatile"
+    
+    if any(k in p_lower for k in GEMINI_KEYWORDS):
+        return "gemini/gemini-1.5-flash"
+        
+    if any(k in p_lower for k in OPENAI_KEYWORDS):
+        return "openai/gpt-4o-mini"
+        
+    return "groq/llama-3.1-8b-instant"

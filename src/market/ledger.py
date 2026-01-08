@@ -6,6 +6,7 @@ It abstracts the database connection and session management.
 """
 
 from typing import List, Optional
+import logging
 from sqlmodel import SQLModel, Session, create_engine, select
 import os
 from .schema import Transaction
@@ -30,14 +31,11 @@ class Ledger:
         self.engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
         
         # Initialize tables
-        # Use a try-except block to handle cases where tables might already exist 
-        # or concurrent access issues during init.
         try:
             SQLModel.metadata.create_all(self.engine)
-        except Exception as e:
-            # In production, we should log this. For now, we assume it's a non-fatal 
-            # issue like pre-existing tables.
-            pass
+        except Exception:
+            logging.exception("Failed to initialize ledger tables")
+            raise
 
     def record_transaction(self, transaction: Transaction) -> Transaction:
         """

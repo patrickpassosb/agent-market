@@ -69,3 +69,18 @@ class MarketState(BaseModel):
     """
     current_price: float
     order_book_summary: Dict[str, Any]
+
+class ActionLog(BaseModel):
+    """
+    Structure for logging an agent's decision and reasoning for the UI.
+    
+    Attributes:
+        agent_id (str): ID of the agent performing the action.
+        action (AgentAction): The type of action taken.
+        price (float): The price point of the action.
+        reasoning (str): The agent's explanation for their decision.
+    """
+    agent_id: str
+    action: AgentAction
+    price: float
+    reasoning: str

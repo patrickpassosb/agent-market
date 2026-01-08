@@ -16,8 +16,9 @@ import os
 import time
 import random
 import logging
+from collections import deque
 from datetime import datetime
-from typing import List
+from typing import List, Iterable
 from dotenv import load_dotenv
 
 from rich.live import Live
@@ -28,8 +29,8 @@ from rich.panel import Panel
 
 from src.market.engine import MarketEngine
 from src.agents.trader import Trader
-from src.market.schema import AgentAction, Transaction
-from src.utils.personas import PERSONAS
+from src.market.schema import AgentAction, Transaction, ActionLog
+from src.utils.personas import PERSONAS, get_model_for_persona
 
 # --- Configuration ---
 
@@ -89,49 +90,13 @@ def create_market_table(state) -> Panel:
     
     return Panel(table, title="Order Book & Price")
 
-# --- Model Selection Logic ---
-
-# Keywords used to map text personas to appropriate underlying models.
-SMART_GROQ_KEYWORDS = ["whale", "market maker"]
-GEMINI_KEYWORDS = ["value", "patient", "long-term", "conservative"]
-OPENAI_KEYWORDS = ["algorithmic", "disciplined", "contrarian"]
-
-def get_model_for_persona(persona: str) -> str:
-    """
-    Intelligently assigns an LLM model based on the complexity/archetype of the persona. 
-    
-    Strategy:
-    - Complex/Strategic roles -> Llama 70B (High reasoning)
-    - Analytical roles -> Gemini Flash (Long context/analytical)
-    - Strict/Rule-based roles -> GPT-4o Mini (Instruction following)
-    - Default/Reactive roles -> Llama 8B (Speed)
-    
-    Args:
-        persona (str): The agent's persona description. 
-        
-    Returns:
-        str: The model identifier string for `litellm`.
-    """
-    p_lower = persona.lower()
-    
-    if any(k in p_lower for k in SMART_GROQ_KEYWORDS):
-        return "groq/llama-3.3-70b-versatile"
-    
-    if any(k in p_lower for k in GEMINI_KEYWORDS):
-        return "gemini/gemini-1.5-flash"
-        
-    if any(k in p_lower for k in OPENAI_KEYWORDS):
-        return "openai/gpt-4o-mini"
-        
-    return "groq/llama-3.1-8b-instant"
-
-def create_activity_table(agents: List[Trader], recent_actions: List[dict]) -> Panel:
+def create_activity_table(agents: List[Trader], recent_actions: Iterable[ActionLog]) -> Panel:
     """
     Renders the Agent Activity feed. 
     
     Args:
         agents (List[Trader]): List of all agents (for ID->Model lookup).
-        recent_actions (List[dict]): List of recent action logs.
+        recent_actions (Iterable[ActionLog]): List of recent action logs.
     """
     table = Table(title="Agent Activity & Decisions")
     table.add_column("Agent / Model", style="white")
@@ -141,12 +106,12 @@ def create_activity_table(agents: List[Trader], recent_actions: List[dict]) -> P
     # Create a quick lookup for agent models to display next to ID
     agent_models = {a.id: a.model_name for a in agents}
 
-    for act in recent_actions[-10:]: # Show last 10 actions only
+    for act in list(recent_actions)[-10:]: # Show last 10 actions only
         # Color coding for actions
-        color = "green" if act['action'] == AgentAction.BUY else "red" if act['action'] == AgentAction.SELL else "yellow"
+        color = "green" if act.action == AgentAction.BUY else "red" if act.action == AgentAction.SELL else "yellow"
         
         # Format Model Name for concise display
-        model_raw = agent_models.get(act['agent_id'], "?")
+        model_raw = agent_models.get(act.agent_id, "?")
         if "70b" in model_raw:
             model_display = "[bold cyan]Llama 70B[/]"
         elif "gemini" in model_raw:
@@ -157,9 +122,9 @@ def create_activity_table(agents: List[Trader], recent_actions: List[dict]) -> P
             model_display = "[dim]Llama 8B[/]"
 
         table.add_row(
-            f"{act['agent_id']} ({model_display})",
-            f"[{color}]{act['action'].value.upper()}[/{color}]",
-            f"{act['reasoning']} (@ {act['price']})"
+            f"{act.agent_id} ({model_display})",
+            f"[{color}]{act.action.value.upper()}[/{color}]",
+            f"{act.reasoning} (@ {act.price})"
         )
     
     return Panel(table, title="Live Feed")
@@ -203,7 +168,7 @@ def main():
     layout["news_flash"].update(Panel("Market Opening...", title="BREAKING NEWS", style="bold red"))
     layout["footer"].update(Panel("Press Ctrl+C to stop", style="dim"))
 
-    recent_actions = []
+    recent_actions = deque(maxlen=200)
     
     # Initialize Journalist
     from src.agents.journalist import JournalistAgent
@@ -244,12 +209,12 @@ def main():
                     )
                     
                     # Prepare log entry
-                    log_entry = {
-                        "agent_id": agent.id,
-                        "action": decision["action"],
-                        "price": decision["price"],
-                        "reasoning": decision["reasoning"]
-                    }
+                    log_entry = ActionLog(
+                        agent_id=agent.id,
+                        action=decision["action"],
+                        price=decision["price"],
+                        reasoning=decision["reasoning"]
+                    )
                     recent_actions.append(log_entry)
                     
                     # --- PHASE 3: LOG & PERSIST ---

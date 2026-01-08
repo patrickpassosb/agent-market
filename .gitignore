@@ -57,4 +57,4 @@ logs/
 .DS_Store
 
 # UV
-uv.lock
+uv.lockplots/

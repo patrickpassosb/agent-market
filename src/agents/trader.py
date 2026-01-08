@@ -8,15 +8,23 @@ It handles:
 3. Structured Output parsing (using `litellm` and `pydantic`).
 """
 
-import os
-import json
 from typing import Optional, Literal
 from pydantic import BaseModel, Field
+import litellm
 from litellm import completion
 from .base import BaseAgent
 from src.market.schema import MarketState, AgentAction
 
 # --- Data Models for LLM Output ---
+
+litellm.enable_json_schema_validation = True
+
+def _parse_structured_response(model_cls: type[BaseModel], content):
+    if isinstance(content, model_cls):
+        return content
+    if isinstance(content, dict):
+        return model_cls.model_validate(content)
+    return model_cls.model_validate_json(content)
 
 class TraderDecision(BaseModel):
     """
@@ -109,7 +117,7 @@ Decide your next action: BUY, SELL, HOLD, or REFLECTION.
             content = response.choices[0].message.content
             
             # Validate JSON against Pydantic model
-            decision = TraderDecision.model_validate_json(content)
+            decision = _parse_structured_response(TraderDecision, content)
             
             # Log the reasoning to the agent's internal long-term memory
             # This allows the agent to "remember" why it did something in future turns.

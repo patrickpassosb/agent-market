@@ -1,6 +1,5 @@
 import pytest
 from src.market.order_book import OrderBook
-from src.market.schema import AgentAction
 
 
 class TestOrderBook:
@@ -90,3 +89,15 @@ class TestOrderBook:
         # No more sellers
         summary = book.get_summary()
         assert summary["asks_count"] == 0
+
+    def test_no_match_across_items(self):
+        """Orders for different items should not match"""
+        book = OrderBook()
+
+        book.add_sell("seller", "MSFT", 9.0)
+        match = book.add_buy("buyer", "AAPL", 10.0)
+
+        assert match is None
+        summary = book.get_summary()
+        assert summary["bids_count"] == 1
+        assert summary["asks_count"] == 1

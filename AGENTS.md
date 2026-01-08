@@ -35,6 +35,7 @@ Rules:
 * **Reuse an existing task** if it already covers the request.
 * If a task exists but needs small changes, **edit the existing task** instead of creating a new one.
 * Create a new task only when no existing task fits.
+* Tasks must be numbered sequentially (e.g., task_1_, task_2_) and placed in .agent/tasks/
 
 ---
 
@@ -72,7 +73,7 @@ Agent MUST minimize tokens:
 ## 6) Task Reuse & Modification Policy
 
 - If an existing task fully or partially covers the current request, Agent MUST reuse it.
-- If the task is mostly correct but incomplete or outdated, Agent- MUST update the existing task.
+- If the task is mostly correct but incomplete or outdated, Agent MUST update the existing task.
 - Create a new task ONLY when:
   - The goal is materially different, or
   - Success criteria no longer overlap, or

@@ -81,3 +81,20 @@ class TestTrader:
         # Reflection returns a dict but with REFLECTION action
         assert decision is not None
         assert decision["action"] == AgentAction.REFLECTION
+
+    @patch('src.agents.trader.completion')
+    def test_act_handles_dict_content(self, mock_completion, mock_market_state):
+        """Test that act() handles already-parsed dict content"""
+        mock_completion.return_value = Mock(
+            choices=[Mock(
+                message=Mock(
+                    content={"action": "buy", "item": "AAPL", "price": 10.0, "reasoning": "Parsed dict"}
+                )
+            )]
+        )
+
+        trader = Trader("agent_1", "Test persona", "gpt-4o-mini")
+        decision = trader.act(mock_market_state)
+
+        assert decision is not None
+        assert decision["action"] == AgentAction.BUY

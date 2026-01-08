@@ -14,7 +14,7 @@ To simulate a Max-Heap for bids, we negate the price before pushing to the heap.
 """
 
 import heapq
-from typing import List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional
 from datetime import datetime
 from .schema import Transaction
 
@@ -23,19 +23,24 @@ class OrderBook:
     In-memory Limit Order Book.
     
     Attributes:
-        bids (List): A heap of buy orders. 
-                     Format: (-price, timestamp, agent_id, item)
-                     Note the negative price for Max-Heap simulation.
-        asks (List): A heap of sell orders. 
-                     Format: (price, timestamp, agent_id, item)
+        bids (Dict[str, List]): Per-item heap of buy orders.
+                                Format: (-price, timestamp, agent_id)
+                                Note the negative price for Max-Heap simulation.
+        asks (Dict[str, List]): Per-item heap of sell orders.
+                                Format: (price, timestamp, agent_id)
     """
 
     def __init__(self):
-        # Buy orders: Max-heap (store negative price to simulate max-heap with python's min-heap)
-        self.bids: List[Tuple[float, float, str, str]] = []
-        
-        # Sell orders: Min-heap
-        self.asks: List[Tuple[float, float, str, str]] = []
+        # Buy orders: Max-heap per item (store negative price to simulate max-heap with python's min-heap)
+        self.bids: Dict[str, List[Tuple[float, float, str]]] = {}
+        # Sell orders: Min-heap per item
+        self.asks: Dict[str, List[Tuple[float, float, str]]] = {}
+
+    def _get_bids(self, item: str) -> List[Tuple[float, float, str]]:
+        return self.bids.setdefault(item, [])
+
+    def _get_asks(self, item: str) -> List[Tuple[float, float, str]]:
+        return self.asks.setdefault(item, [])
 
     def add_buy(self, agent_id: str, item: str, price: float) -> Optional[Transaction]:
         """
@@ -56,15 +61,16 @@ class OrderBook:
         """
         timestamp = datetime.utcnow().timestamp()
         
-        # Check if we can match with existing sell orders (asks)
+        # Check if we can match with existing sell orders (asks) for this item
         # Lowest ask is at asks[0] (Min-Heap Root)
-        if self.asks:
-            best_ask_price, ask_ts, seller_id, ask_item = self.asks[0]
+        asks = self._get_asks(item)
+        if asks:
+            best_ask_price, ask_ts, seller_id = asks[0]
             
             # If the lowest ask is cheap enough for the buyer
             if price >= best_ask_price:
                 # MATCH! Remove the ask from the book
-                heapq.heappop(self.asks)
+                heapq.heappop(asks)
                 
                 # Execution happens at the Maker's price (the one already in the book)
                 execution_price = best_ask_price
@@ -79,7 +85,8 @@ class OrderBook:
         
         # No match found, add to order book as a resting order
         # Push (-price) to simulate Max-Heap behavior with heapq
-        heapq.heappush(self.bids, (-price, timestamp, agent_id, item))
+        bids = self._get_bids(item)
+        heapq.heappush(bids, (-price, timestamp, agent_id))
         return None
 
     def add_sell(self, agent_id: str, item: str, price: float) -> Optional[Transaction]:
@@ -101,16 +108,17 @@ class OrderBook:
         """
         timestamp = datetime.utcnow().timestamp()
         
-        # Check if we can match with existing buy orders (bids)
+        # Check if we can match with existing buy orders (bids) for this item
         # Highest bid is at bids[0] (stored as negative value)
-        if self.bids:
-            neg_best_bid_price, bid_ts, buyer_id, bid_item = self.bids[0]
+        bids = self._get_bids(item)
+        if bids:
+            neg_best_bid_price, bid_ts, buyer_id = bids[0]
             best_bid_price = -neg_best_bid_price
             
             # If the highest bid is high enough for the seller
             if best_bid_price >= price:
                 # MATCH! Remove the bid from the book
-                heapq.heappop(self.bids)
+                heapq.heappop(bids)
                 
                 # Execution happens at the Maker's price (the bid price)
                 execution_price = best_bid_price
@@ -124,7 +132,8 @@ class OrderBook:
                 )
         
         # No match found, add to order book as a resting order
-        heapq.heappush(self.asks, (price, timestamp, agent_id, item))
+        asks = self._get_asks(item)
+        heapq.heappush(asks, (price, timestamp, agent_id))
         return None
 
     def get_summary(self) -> dict:
@@ -141,15 +150,25 @@ class OrderBook:
                 "asks_count": int
             }
         """
-        # Best bid is at index 0 (negated)
-        best_bid = -self.bids[0][0] if self.bids else None
-        
-        # Best ask is at index 0
-        best_ask = self.asks[0][0] if self.asks else None
+        best_bid = None
+        for heap in self.bids.values():
+            if not heap:
+                continue
+            price = -heap[0][0]
+            if best_bid is None or price > best_bid:
+                best_bid = price
+
+        best_ask = None
+        for heap in self.asks.values():
+            if not heap:
+                continue
+            price = heap[0][0]
+            if best_ask is None or price < best_ask:
+                best_ask = price
         
         return {
             "best_bid": best_bid,
             "best_ask": best_ask,
-            "bids_count": len(self.bids),
-            "asks_count": len(self.asks)
+            "bids_count": sum(len(heap) for heap in self.bids.values()),
+            "asks_count": sum(len(heap) for heap in self.asks.values())
         }

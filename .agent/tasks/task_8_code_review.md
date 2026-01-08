@@ -33,9 +33,9 @@ Core simulation loop in `main.py` with agents calling LiteLLM; in-memory order b
 The user requests a senior-level code review with prioritized findings and actionable recommendations, focusing on quality, performance, best practices, bugs/edge cases, security, and maintainability.
 
 ### Success Criteria
-- [ ] Identify and prioritize risks with file references and clear reasoning.
-- [ ] Provide concrete improvement examples (code or refactor notes) where feasible.
-- [ ] Call out missing tests or validation gaps that impact confidence.
+- [ ] Fix item-aware matching, LLM structured output parsing, trend direction, ledger init error handling, action log growth, and input validation.
+- [ ] Add tests covering multi-item matching, dict content parsing, trend ordering, and invalid prices.
+- [ ] All High/Medium/Low findings addressed without breaking core behavior.
 
 ---
 
@@ -109,10 +109,11 @@ N/A
 
 ## 9. Implementation Plan
 
-1. Scan project structure and identify key modules.
-2. Review core logic, data access, and boundary handling.
-3. Review tests and coverage gaps.
-4. Produce prioritized findings with examples.
+1. Update OrderBook structure for item-aware matching and summary.
+2. Harden LLM structured output parsing in Trader and Journalist.
+3. Fix trend ordering and ledger init error handling.
+4. Add validation + bounded action log storage.
+5. Add tests for new edge cases.
 
 ---
 

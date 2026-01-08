@@ -13,6 +13,7 @@ Responsibilities:
 """
 
 from typing import List, Any, Dict, Optional
+import math
 from datetime import datetime
 
 from .ledger import Ledger
@@ -72,13 +73,22 @@ class MarketEngine:
         """
         transaction = None
         
+        # HOLD or REFLECTION actions have no market impact
+        if action in (AgentAction.HOLD, AgentAction.REFLECTION):
+            return None
+
+        if not isinstance(item, str) or not item.strip():
+            return None
+
+        if not isinstance(price, (int, float)) or not math.isfinite(price) or price <= 0:
+            return None
+
         # Route action to the appropriate OrderBook method
         if action == AgentAction.BUY:
-            transaction = self.order_book.add_buy(agent_id, item, price)
+            transaction = self.order_book.add_buy(agent_id, item, float(price))
         elif action == AgentAction.SELL:
-            transaction = self.order_book.add_sell(agent_id, item, price)
+            transaction = self.order_book.add_sell(agent_id, item, float(price))
         else:
-            # HOLD or REFLECTION actions have no market impact
             return None
 
         # If the order resulted in a trade
