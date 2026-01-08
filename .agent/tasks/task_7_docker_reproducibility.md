@@ -1,4 +1,4 @@
-# Task 6: Docker Containerization
+# Task 7: Docker Containerization
 
 ## 1. Task Overview
 

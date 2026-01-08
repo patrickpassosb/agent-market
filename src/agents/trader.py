@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 import litellm
 from litellm import completion
 from .base import BaseAgent
-from src.market.schema import MarketState, AgentAction
+from src.market.schema import MarketState, AgentAction, DEFAULT_ITEM
 
 # --- Data Models for LLM Output ---
 
@@ -114,7 +114,7 @@ class Trader(BaseAgent):
         """
         
         # 1. Get portfolio context
-        current_prices = {"apple": market_state.current_price}  # TODO: Multi-asset
+        current_prices = {DEFAULT_ITEM: market_state.current_price}  # TODO: Multi-asset
         portfolio_metrics = self.portfolio.get_metrics(current_prices)
         
         # 2. Retrieve relevant memories

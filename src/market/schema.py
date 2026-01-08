@@ -15,6 +15,8 @@ from typing import Dict, Any, Optional
 from pydantic import BaseModel
 from sqlmodel import Field, SQLModel
 
+DEFAULT_ITEM = "apple"  # Module-level constant; see https://github.com/python/cpython/blob/main/Doc/tutorial/modules.rst (Context7 /python/cpython)
+
 class AgentAction(str, Enum):
     """
     Enumeration of possible actions an agent can take in a single simulation tick.

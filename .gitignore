@@ -52,9 +52,12 @@ demo_market.db
 # Logs and Data
 logs/
 *.log
+# gitignore patterns per https://github.com/git/git/blob/master/Documentation/gitignore.adoc (Context7 /git/git)
+.coverage
+plots/
 
 # Mac
 .DS_Store
 
 # UV
-uv.lockplots/
+uv.lock

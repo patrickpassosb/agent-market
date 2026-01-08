@@ -18,7 +18,7 @@ from datetime import datetime
 
 from .ledger import Ledger
 from .order_book import OrderBook
-from .schema import Transaction, AgentAction, MarketState
+from .schema import Transaction, AgentAction, MarketState, DEFAULT_ITEM
 
 class MarketEngine:
     """
@@ -56,7 +56,7 @@ class MarketEngine:
             order_book_summary=summary
         )
 
-    def process_action(self, agent: Any, action: AgentAction, item: str = "apple", price: float = 0.0) -> Optional[Transaction]:
+    def process_action(self, agent: Any, action: AgentAction, item: str = DEFAULT_ITEM, price: float = 0.0) -> Optional[Transaction]:
         """
         Processes an action submitted by an agent.
         
@@ -70,7 +70,7 @@ class MarketEngine:
             agent (BaseAgent): The agent instance submitting the action. 
                                Must have a `portfolio` attribute.
             action (AgentAction): The type of action (BUY, SELL, HOLD, REFLECTION).
-            item (str): The asset involved (default "apple").
+            item (str): The asset involved (default `DEFAULT_ITEM`).
             price (float): The limit price for the order.
             
         Returns:

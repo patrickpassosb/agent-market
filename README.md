@@ -84,17 +84,14 @@ open htmlcov/index.html
 
 ## 📚 Documentation
 
-Detailed documentation is available in the `docs/` folder and project root:
+Detailed documentation is available in the project root:
 
--   **[System Architecture](docs/ARCHITECTURE.md)**: High-level system design, data flow diagrams, and component breakdown.
--   **[Technical Docs](TECHNICAL_DOCS.md)**: Deep dive into the Hybrid LLM Strategy, Persona mappings, and Database Schema.
--   **[Deployment Guide](DEPLOYMENT.md)**: Instructions for Docker, Cloud Run, and Streamlit deployment.
+-   **[Technical Docs](TECHNICAL_DOCS.md)**: Hybrid LLM strategy, architecture, and data schemas.
+-   **[Agent Rules](AGENTS.md)**: Operational guide for agent workflows and constraints.
 
 ## 🧠 Architecture
 
 The system follows a **Facade-based architecture** where the central `MarketEngine` mediates all interactions between the autonomous **Agents** and the **Order Book**.
-
-> **See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for full diagrams and details.**
 
 ### Core Loop
 1.  **Sense:** Agents receive the current `MarketState` (Price, L1 Order Book).
@@ -118,10 +115,34 @@ The system follows a **Facade-based architecture** where the central `MarketEngi
 
 ## 📦 Deployment
 
-See [DEPLOYMENT.md](./DEPLOYMENT.md) for detailed deployment options including:
-- Streamlit Cloud
-- Docker + Cloud Run
-- Render/Railway
+### Terminal UI (Local)
+```bash
+uv run python main.py
+```
+
+### Streamlit Web UI (Optional)
+```bash
+uv add streamlit plotly
+streamlit run app_web.py
+```
+Add API keys as secrets if deploying via Streamlit Community Cloud.
+
+### Docker
+```bash
+docker build -t agent-market .
+docker run --env-file .env agent-market
+```
+
+### Cloud Run (GCP)
+```bash
+gcloud run deploy agent-market \
+  --source . \
+  --region us-central1 \
+  --allow-unauthenticated
+```
+
+### Render / Railway / Fly.io
+Set build command to `uv sync` and start command to `uv run python main.py`, then add API keys as environment variables.
 
 ---
 *Built for the Multi-Agent Marketplace Simulation Challenge.*

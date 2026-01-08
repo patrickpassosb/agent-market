@@ -11,7 +11,75 @@ To maximize performance within rate limits and budget, we employ a tiered model 
 | **Algorithmic Traders** | `gpt-4o-mini` | Best at following strict structured output (JSON) rules for high-frequency logic. |
 | **Retail / FOMO** | `llama-3.1-8b-instant` | Needs speed and low latency; "vibes based" trading doesn't require deep reasoning. |
 
-*Implemented in `main.py:get_model_for_persona()`*
+*Implemented in `src/utils/personas.py:get_model_for_persona()`*
+
+## System Architecture
+
+The system is a **discrete-time tick-based simulation** where autonomous AI agents trade assets in a centralized market.
+
+### Core Components
+
+1.  **Market Engine (`src/market/`)**: Handles order matching, transaction recording, and time.
+2.  **Agents (`src/agents/`)**: Autonomous entities that perceive the market and make decisions using LLMs.
+3.  **Memory (`src/memory/`)**: RAG-style memory for each agent.
+4.  **Orchestrator (`main.py`)**: Main loop that synchronizes time, UI, and agent turns.
+
+### Execution Flow (Game Loop)
+
+```mermaid
+sequenceDiagram
+    participant Main as Orchestrator
+    participant Engine as MarketEngine
+    participant Agent as TraderAgent
+    participant LLM as LLM Provider
+    participant DB as Ledger/Memory
+
+    loop Every Tick
+        Main->>Engine: get_state()
+        Engine-->>Main: MarketState (Price, Order Book)
+        
+        Main->>Agent: act(MarketState)
+        
+        rect rgb(240, 240, 240)
+            Note right of Agent: Cognitive Cycle
+            Agent->>DB: retrieve_memory(context)
+            DB-->>Agent: Relevant Past Memories
+            Agent->>LLM: Prompt (Persona + Market + Memory)
+            LLM-->>Agent: JSON Decision (BUY/SELL/HOLD)
+            Agent->>DB: remember(Reasoning)
+        end
+        
+        Agent-->>Main: Action
+        
+        Main->>Engine: process_action(Action)
+        
+        alt Action is Trade
+            Engine->>OrderBook: match_order()
+            OrderBook-->>Engine: Transaction
+            Engine->>DB: record_transaction()
+        end
+        
+        Main->>UI: Update Dashboard
+    end
+```
+
+### Market Engine (`src/market/engine.py`)
+
+Acts as a **Facade** over the `OrderBook` and `Ledger`.
+-   **Order Book (`src/market/order_book.py`)**: Double auction with bids as a max-heap and asks as a min-heap.
+-   **Ledger (`src/market/ledger.py`)**: SQLModel persistence to `market.db`.
+
+### Intelligent Agents (`src/agents/trader.py`)
+
+-   **Inputs**: `MarketState` and `Portfolio`.
+-   **Brain**: Hybrid LLM strategy per persona.
+-   **Output**: Structured JSON enforcing the `TraderDecision` schema.
+
+### Memory System (`src/memory/memory.py`)
+
+-   **Technology**: ChromaDB local vector store.
+-   **Write**: Store brief reasoning after each decision.
+-   **Read**: Retrieve similar historical context to influence future decisions.
 
 ## Data Persistence
 
