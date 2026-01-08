@@ -14,6 +14,7 @@ Responsibilities:
 
 from typing import List, Any, Dict, Optional
 import math
+import math
 from datetime import datetime
 
 from .ledger import Ledger
@@ -30,7 +31,12 @@ class MarketEngine:
         last_price (float): The price of the most recent execution. Used as the "current market price".
     """
 
-    def __init__(self, db_path: str = "market.db", run_id: Optional[str] = None):
+    def __init__(
+        self,
+        db_path: str = "market.db",
+        run_id: Optional[str] = None,
+        initial_price: float = 100.0,
+    ):
         """
         Initialize the market engine.
         
@@ -39,7 +45,9 @@ class MarketEngine:
         """
         self.ledger = Ledger(db_path)
         self.order_book = OrderBook()
-        self.last_price = 0.0 # Initialize at 0, or could be a seed price
+        if not isinstance(initial_price, (int, float)) or not math.isfinite(initial_price) or initial_price <= 0:
+            initial_price = 100.0  # Guard against invalid seeds per https://github.com/python/cpython/blob/main/Doc/library/math.rst (Context7 /python/cpython)
+        self.last_price = float(initial_price)
         self.run_id = run_id
 
     def get_state(self) -> MarketState:

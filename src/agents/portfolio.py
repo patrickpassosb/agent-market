@@ -5,6 +5,7 @@ Tracks cash, positions, and calculates profit/loss metrics.
 """
 
 from typing import Dict
+import math
 from pydantic import BaseModel, Field, ConfigDict, PrivateAttr
 
 
@@ -133,3 +134,23 @@ class Portfolio(BaseModel):
             "roi": (total_pnl / initial_capital) * 100 if initial_capital > 0 else 0.0,
             "trades_count": self.trades_count
         }
+
+    def seed_position(self, item: str, quantity: int, price: float) -> None:
+        """
+        Seed initial inventory while preserving total portfolio value.
+        """
+        if quantity <= 0 or not math.isfinite(price) or price <= 0:
+            return  # https://github.com/python/cpython/blob/main/Doc/library/math.rst (Context7 /python/cpython)
+        total_cost = quantity * price
+        if self.cash < total_cost:
+            return
+        self.cash -= total_cost
+
+        current_qty = self.positions.get(item, 0)
+        current_basis = self._cost_basis.get(item, 0.0)
+        total_units = current_qty + quantity
+        total_value = (current_qty * current_basis) + total_cost
+        new_basis = total_value / total_units if total_units > 0 else 0.0
+
+        self.positions[item] = total_units
+        self._cost_basis[item] = new_basis

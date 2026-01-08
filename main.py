@@ -39,7 +39,7 @@ logging.getLogger("litellm").setLevel(logging.CRITICAL)
 
 from src.market.engine import MarketEngine
 from src.agents.trader import Trader
-from src.market.schema import AgentAction, Transaction, ActionLog, InteractionLog
+from src.market.schema import AgentAction, Transaction, ActionLog, InteractionLog, DEFAULT_ITEM
 from src.utils.personas import PERSONAS, get_model_for_persona
 from src.utils.checkpoints import build_checkpoint, write_checkpoint
 from src.analysis.report import generate_report
@@ -154,6 +154,8 @@ def parse_args():
     parser.add_argument("--checkpoint-dir", type=str, default="checkpoints", help="Directory for checkpoint JSON files.")
     parser.add_argument("--checkpoint-transactions", type=int, default=50, help="Transactions to include in checkpoints.")
     parser.add_argument("--checkpoint-interactions", type=int, default=100, help="Interactions to include in checkpoints.")
+    parser.add_argument("--initial-price", type=float, default=100.0, help="Seed price for the first tick.")  # https://github.com/python/cpython/blob/main/Doc/library/argparse.rst (Context7 /python/cpython)
+    parser.add_argument("--seed-inventory", type=int, default=1, help="Initial units assigned to each agent.")  # https://github.com/python/cpython/blob/main/Doc/library/argparse.rst (Context7 /python/cpython)
     parser.add_argument("--report-dir", type=str, default="reports", help="Directory for post-run reports.")
     parser.add_argument("--no-report", action="store_true", help="Disable post-run report generation.")
     return parser.parse_args()
@@ -180,7 +182,7 @@ def main():
     logging.info(f"Starting Agent Market Simulation | run_id={run_id}")
 
     # Initialize Market Engine
-    engine = MarketEngine("market.db", run_id=run_id)
+    engine = MarketEngine("market.db", run_id=run_id, initial_price=args.initial_price)
     agents: List[Trader] = []
     
     # Initialize Agents with random personas
@@ -192,6 +194,8 @@ def main():
         model = get_model_for_persona(persona)
         
         agent = Trader(agent_id=agent_id, persona=persona, model_name=model)
+        if args.seed_inventory > 0:
+            agent.portfolio.seed_position(DEFAULT_ITEM, args.seed_inventory, args.initial_price)
         agents.append(agent)
     
     # Initialize UI

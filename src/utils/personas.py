@@ -6,6 +6,10 @@ Using a predefined list ensures a heterogeneous market environment with conflict
 which is necessary for liquidity and price discovery.
 """
 
+from __future__ import annotations
+
+import os
+
 PERSONAS = [
     "A conservative long-term investor who only buys when prices are historically low and holds for long periods.",
     "A high-frequency momentum trader who buys when prices are rising and sells quickly when they dip.",
@@ -21,10 +25,72 @@ PERSONAS = [
     "A DCA (Dollar Cost Average) buyer who buys a fixed amount every tick regardless of price."
 ]
 
-# Keywords used to map text personas to appropriate underlying models.
-SMART_GROQ_KEYWORDS = ["whale", "market maker"]
-GEMINI_KEYWORDS = ["value", "patient", "long-term", "conservative"]
-OPENAI_KEYWORDS = ["algorithmic", "disciplined", "contrarian"]
+# Keywords used to map text personas to tiers.
+STRATEGIC_KEYWORDS = ["whale", "market maker"]
+ANALYTICAL_KEYWORDS = ["value", "patient", "long-term", "conservative"]
+RULE_BASED_KEYWORDS = ["algorithmic", "disciplined", "contrarian"]
+
+PROVIDER_ORDER = os.getenv("MODEL_PROVIDER_ORDER", "openrouter,groq,gemini").split(",")
+
+# OpenRouter uses OPENROUTER_API_KEY and optional OPENROUTER_API_BASE/OR_* envs.
+# https://github.com/berriai/litellm/blob/main/docs/my-website/docs/providers/openrouter.md (Context7 /berriai/litellm)
+OPENROUTER_MODELS = {
+    "strategic": os.getenv("OPENROUTER_MODEL_STRATEGIC"),
+    "analytical": os.getenv("OPENROUTER_MODEL_ANALYTICAL"),
+    "rule": os.getenv("OPENROUTER_MODEL_RULE"),
+    "fast": os.getenv("OPENROUTER_MODEL_FAST"),
+}
+
+GROQ_MODELS = {
+    "strategic": "groq/llama-3.3-70b-versatile",
+    "analytical": "groq/llama-3.1-8b-instant",
+    "rule": "groq/llama-3.1-8b-instant",
+    "fast": "groq/llama-3.1-8b-instant",
+}
+
+GEMINI_MODELS = {
+    "strategic": "gemini/gemini-1.5-flash",
+    "analytical": "gemini/gemini-1.5-flash",
+    "rule": "gemini/gemini-1.5-flash",
+    "fast": "gemini/gemini-1.5-flash",
+}
+
+_ROUND_ROBIN = {"strategic": 0, "analytical": 0, "rule": 0, "fast": 0}
+
+
+def _available_models(tier: str) -> list[str]:
+    models: list[str] = []
+    for provider in PROVIDER_ORDER:
+        provider = provider.strip()
+        if provider == "openrouter":
+            model = OPENROUTER_MODELS.get(tier) or OPENROUTER_MODELS.get("fast")
+            if model and os.getenv("OPENROUTER_API_KEY"):
+                models.append(model)
+        elif provider == "groq" and os.getenv("GROQ_API_KEY"):
+            models.append(GROQ_MODELS[tier])
+        elif provider == "gemini" and os.getenv("GEMINI_API_KEY"):
+            models.append(GEMINI_MODELS[tier])
+    return models
+
+
+def _choose_model(tier: str) -> str:
+    candidates = _available_models(tier)
+    if not candidates:
+        return GROQ_MODELS["fast"]
+    index = _ROUND_ROBIN[tier] % len(candidates)
+    _ROUND_ROBIN[tier] = _ROUND_ROBIN[tier] + 1
+    return candidates[index]
+
+
+def _persona_tier(persona: str) -> str:
+    p_lower = persona.lower()
+    if any(k in p_lower for k in STRATEGIC_KEYWORDS):
+        return "strategic"
+    if any(k in p_lower for k in ANALYTICAL_KEYWORDS):
+        return "analytical"
+    if any(k in p_lower for k in RULE_BASED_KEYWORDS):
+        return "rule"
+    return "fast"
 
 def get_model_for_persona(persona: str) -> str:
     """
@@ -42,15 +108,5 @@ def get_model_for_persona(persona: str) -> str:
     Returns:
         str: The model identifier string for `litellm`.
     """
-    p_lower = persona.lower()
-    
-    if any(k in p_lower for k in SMART_GROQ_KEYWORDS):
-        return "groq/llama-3.3-70b-versatile"
-    
-    if any(k in p_lower for k in GEMINI_KEYWORDS):
-        return "gemini/gemini-1.5-flash"
-        
-    if any(k in p_lower for k in OPENAI_KEYWORDS):
-        return "openai/gpt-4o-mini"
-        
-    return "groq/llama-3.1-8b-instant"
+    tier = _persona_tier(persona)
+    return _choose_model(tier)

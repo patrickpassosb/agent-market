@@ -9,6 +9,7 @@ It handles:
 """
 
 from typing import Optional, Literal
+import math
 from pydantic import BaseModel, Field
 import litellm
 from litellm import completion
@@ -168,6 +169,11 @@ Decide: BUY, SELL, HOLD, or REFLECTION (internal thought only).
             # Validate JSON against Pydantic model
             decision = _parse_structured_response(TraderDecision, content)
             
+            if decision.action in ("buy", "sell"):
+                if not math.isfinite(decision.price) or decision.price <= 0:
+                    # Ensure tradable prices to avoid zero-trade runs (Context7 /python/cpython https://github.com/python/cpython/blob/main/Doc/library/math.rst)
+                    decision.price = market_state.current_price if market_state.current_price > 0 else 1.0
+
             # Log the reasoning to the agent's internal long-term memory
             # This allows the agent to "remember" why it did something in future turns.
             self.remember(f"Decided to {decision.action} at {decision.price}: {decision.reasoning}")

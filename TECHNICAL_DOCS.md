@@ -8,7 +8,7 @@ To maximize performance within rate limits and budget, we employ a tiered model 
 | :--- | :--- | :--- |
 | **Whales / Market Makers** | `llama-3.3-70b-versatile` | Requires high reasoning to manipulate markets and manage large capital. |
 | **Value Investors** | `gemini-1.5-flash` | Needs large context window to analyze price history and trends effectively. |
-| **Algorithmic Traders** | `gpt-4o-mini` | Best at following strict structured output (JSON) rules for high-frequency logic. |
+| **Algorithmic Traders** | `groq/llama-3.1-8b-instant` or OpenRouter/Gemini | Routed across available providers to reduce free-tier limits. |
 | **Retail / FOMO** | `llama-3.1-8b-instant` | Needs speed and low latency; "vibes based" trading doesn't require deep reasoning. |
 
 *Implemented in `src/utils/personas.py:get_model_for_persona()`*
