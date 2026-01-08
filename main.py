@@ -42,6 +42,7 @@ from src.agents.trader import Trader
 from src.market.schema import AgentAction, Transaction, ActionLog, InteractionLog
 from src.utils.personas import PERSONAS, get_model_for_persona
 from src.utils.checkpoints import build_checkpoint, write_checkpoint
+from src.analysis.report import generate_report
 
 # --- Configuration ---
 
@@ -153,6 +154,8 @@ def parse_args():
     parser.add_argument("--checkpoint-dir", type=str, default="checkpoints", help="Directory for checkpoint JSON files.")
     parser.add_argument("--checkpoint-transactions", type=int, default=50, help="Transactions to include in checkpoints.")
     parser.add_argument("--checkpoint-interactions", type=int, default=100, help="Interactions to include in checkpoints.")
+    parser.add_argument("--report-dir", type=str, default="reports", help="Directory for post-run reports.")
+    parser.add_argument("--no-report", action="store_true", help="Disable post-run report generation.")
     return parser.parse_args()
 
 
@@ -164,7 +167,8 @@ def main():
     
     # Ensure logs directory exists and setup logging
     os.makedirs("logs", exist_ok=True)
-    log_filename = f"logs/simulation_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+    run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_filename = f"logs/simulation_{run_id}.log"
     
     # Configure global logging
     logging.basicConfig(
@@ -173,10 +177,10 @@ def main():
         format='%(asctime)s - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
-    logging.info("Starting Agent Market Simulation")
+    logging.info(f"Starting Agent Market Simulation | run_id={run_id}")
 
     # Initialize Market Engine
-    engine = MarketEngine("market.db")
+    engine = MarketEngine("market.db", run_id=run_id)
     agents: List[Trader] = []
     
     # Initialize Agents with random personas
@@ -205,103 +209,115 @@ def main():
     # 2. Execution Loop
     with Live(layout, refresh_per_second=4, screen=True) as live:
         tick = 0
-        while True:
-            tick += 1
-            start_time = time.time()
+        try:
+            while True:
+                tick += 1
+                start_time = time.time()
             
-            # --- MARKET TICK ---
-            market_state = engine.get_state()
+                # --- MARKET TICK ---
+                market_state = engine.get_state()
             
-            # --- JOURNALIST UPDATE ---
-            if tick % 10 == 0:
-                # Get last 20 txns for context
-                recent_txns = engine.ledger.get_transactions(limit=20)
-                news = journalist.analyze(market_state, recent_txns)
-                layout["news_flash"].update(Panel(f"[bold]{news.headline}[/bold]\n{news.body}", title="BREAKING NEWS", style="bold red"))
+                # --- JOURNALIST UPDATE ---
+                if tick % 10 == 0:
+                    # Get last 20 txns for context
+                    recent_txns = engine.ledger.get_transactions(limit=20)
+                    news = journalist.analyze(market_state, recent_txns)
+                    layout["news_flash"].update(Panel(f"[bold]{news.headline}[/bold]\n{news.body}", title="BREAKING NEWS", style="bold red"))
             
-            # Shuffle agents so they act in random order (fairness in sequential processing)
-            random.shuffle(agents)
+                # Shuffle agents so they act in random order (fairness in sequential processing)
+                random.shuffle(agents)
             
             # --- PHASE 2: THINK & ACT ---
-            for agent in agents:
-                # Agent perceives state, retrieves memory, and decides
-                decision = agent.act(market_state)
-                
-                if decision:
-                    # Negotiate a counter-offer if quotes are far from the submitted price
-                    negotiated_price, negotiation_details = engine.negotiate_price(
-                        agent_id=agent.id,
-                        action=decision["action"],
-                        item=decision["item"],
-                        price=decision["price"],
-                    )
-                    if negotiation_details:
-                        decision["price"] = negotiated_price
-                        engine.ledger.record_interaction(InteractionLog(**negotiation_details))
-                        logging.info(
-                            f"NEGOTIATION: {agent.id} | ACTION: {decision['action'].value} | PRICE: {decision['price']}"
-                        )
-
-                    # Execute action against the market engine
-                    # Now passes the full agent object (for portfolio access)
-                    tx = engine.process_action(
-                        agent,  # Changed from agent.id
-                        decision["action"], 
-                        decision["item"], 
-                        decision["price"]
-                    )
+                for agent in agents:
+                    # Agent perceives state, retrieves memory, and decides
+                    decision = agent.act(market_state)
                     
-                    # Prepare log entry
-                    log_entry = ActionLog(
-                        agent_id=agent.id,
-                        action=decision["action"],
-                        price=decision["price"],
-                        reasoning=decision["reasoning"]
-                    )
-                    recent_actions.append(log_entry)
-                    
-                    # --- PHASE 3: LOG & PERSIST ---
-                    # Persist log to file
-                    logging.info(f"AGENT: {agent.id} | ACTION: {decision['action'].value} | PRICE: {decision['price']} | REASON: {decision['reasoning']}")
-                    engine.ledger.record_interaction(
-                        InteractionLog(
+                    if decision:
+                        # Negotiate a counter-offer if quotes are far from the submitted price
+                        negotiated_price, negotiation_details = engine.negotiate_price(
                             agent_id=agent.id,
-                            kind="action",
-                            action=decision["action"].value,
+                            action=decision["action"],
                             item=decision["item"],
                             price=decision["price"],
-                            details=decision["reasoning"],
                         )
+                        if negotiation_details:
+                            decision["price"] = negotiated_price
+                            engine.ledger.record_interaction(InteractionLog(**negotiation_details))
+                            logging.info(
+                                f"NEGOTIATION: {agent.id} | ACTION: {decision['action'].value} | PRICE: {decision['price']}"
+                            )
+
+                        # Execute action against the market engine
+                        # Now passes the full agent object (for portfolio access)
+                        tx = engine.process_action(
+                            agent,  # Changed from agent.id
+                            decision["action"], 
+                            decision["item"], 
+                            decision["price"]
+                        )
+                        
+                        # Prepare log entry
+                        log_entry = ActionLog(
+                            agent_id=agent.id,
+                            action=decision["action"],
+                            price=decision["price"],
+                            reasoning=decision["reasoning"]
+                        )
+                        recent_actions.append(log_entry)
+                        
+                        # --- PHASE 3: LOG & PERSIST ---
+                        # Persist log to file
+                        logging.info(f"AGENT: {agent.id} | ACTION: {decision['action'].value} | PRICE: {decision['price']} | REASON: {decision['reasoning']}")
+                        engine.ledger.record_interaction(
+                            InteractionLog(
+                                run_id=run_id,
+                                agent_id=agent.id,
+                                kind="action",
+                                action=decision["action"].value,
+                                item=decision["item"],
+                                price=decision["price"],
+                                details=decision["reasoning"],
+                            )
+                        )
+                        if tx:
+                            logging.info(f"  -> TRADE EXECUTED: {tx}")
+
+                # --- PHASE 4: VISUALIZE ---
+                # Update the UI components with the new state
+                layout["market_status"].update(create_market_table(engine.get_state()))
+                layout["recent_activity"].update(create_activity_table(agents, recent_actions))
+                
+                # Control simulation speed
+                elapsed = time.time() - start_time
+                sleep_time = max(0, Tick_Duration - elapsed)
+                time.sleep(sleep_time)
+
+                # --- CHECKPOINTS ---
+                if args.checkpoint_every and tick % args.checkpoint_every == 0:
+                    payload = build_checkpoint(
+                        tick=tick,
+                        market_state=market_state,
+                        agents=agents,
+                        transactions=engine.ledger.get_transactions(limit=args.checkpoint_transactions),
+                        interactions=engine.ledger.get_interactions(limit=args.checkpoint_interactions),
                     )
-                    if tx:
-                        logging.info(f"  -> TRADE EXECUTED: {tx}")
+                    filename = f"checkpoint_{tick:06d}.json"
+                    path = write_checkpoint(payload, args.checkpoint_dir, filename)
+                    logging.info(f"CHECKPOINT: {path}")
 
-            # --- PHASE 4: VISUALIZE ---
-            # Update the UI components with the new state
-            layout["market_status"].update(create_market_table(engine.get_state()))
-            layout["recent_activity"].update(create_activity_table(agents, recent_actions))
-            
-            # Control simulation speed
-            elapsed = time.time() - start_time
-            sleep_time = max(0, Tick_Duration - elapsed)
-            time.sleep(sleep_time)
-
-            # --- CHECKPOINTS ---
-            if args.checkpoint_every and tick % args.checkpoint_every == 0:
-                payload = build_checkpoint(
-                    tick=tick,
-                    market_state=market_state,
+                if args.max_ticks and tick >= args.max_ticks:
+                    logging.info(f"Simulation completed after {tick} ticks.")
+                    break
+        finally:
+            if not args.no_report:
+                report_dir = generate_report(
+                    run_id=run_id,
+                    db_path="market.db",
+                    report_root=args.report_dir,
                     agents=agents,
-                    transactions=engine.ledger.get_transactions(limit=args.checkpoint_transactions),
-                    interactions=engine.ledger.get_interactions(limit=args.checkpoint_interactions),
+                    current_price=engine.last_price,
                 )
-                filename = f"checkpoint_{tick:06d}.json"
-                path = write_checkpoint(payload, args.checkpoint_dir, filename)
-                logging.info(f"CHECKPOINT: {path}")
-
-            if args.max_ticks and tick >= args.max_ticks:
-                logging.info(f"Simulation completed after {tick} ticks.")
-                break
+                logging.info(f"REPORT: {report_dir}")
 
 if __name__ == "__main__":
     try:

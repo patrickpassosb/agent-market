@@ -30,7 +30,7 @@ class MarketEngine:
         last_price (float): The price of the most recent execution. Used as the "current market price".
     """
 
-    def __init__(self, db_path: str = "market.db"):
+    def __init__(self, db_path: str = "market.db", run_id: Optional[str] = None):
         """
         Initialize the market engine.
         
@@ -40,6 +40,7 @@ class MarketEngine:
         self.ledger = Ledger(db_path)
         self.order_book = OrderBook()
         self.last_price = 0.0 # Initialize at 0, or could be a seed price
+        self.run_id = run_id
 
     def get_state(self) -> MarketState:
         """
@@ -126,6 +127,8 @@ class MarketEngine:
 
         # If the order resulted in a trade AND portfolio execution succeeded
         if transaction:
+            if self.run_id:
+                transaction.run_id = self.run_id
             # 1. Persist to DB
             self.ledger.record_transaction(transaction)
             
@@ -153,6 +156,8 @@ class MarketEngine:
                 "price": counter_price,
                 "details": f"Counter-offer between bid {price} and ask {best_ask}.",
             }
+            if self.run_id:
+                details["run_id"] = self.run_id
             return counter_price, details
 
         if action == AgentAction.SELL and best_bid is not None and price > best_bid:
@@ -166,6 +171,8 @@ class MarketEngine:
                 "price": counter_price,
                 "details": f"Counter-offer between ask {price} and bid {best_bid}.",
             }
+            if self.run_id:
+                details["run_id"] = self.run_id
             return counter_price, details
 
         return price, None

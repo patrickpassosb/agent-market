@@ -8,11 +8,11 @@
 
 ### Task Title
 <!-- Give your task a clear, specific name that describes what you're building or fixing -->
-**Title:** [Brief, descriptive title - e.g., "Add User Authentication System" or "Fix Payment Integration Bug"]
+**Title:** Improvement Plan for Agent-Market to Maximize Hiring Impact
 
 ### Goal Statement
 <!-- Write one paragraph explaining what you want to achieve and why it matters for your project -->
-**Goal:** [Clear statement of the end result you want and the business/user value it provides]
+**Goal:** Implement per-run reports with a summary index to make simulation outcomes understandable and hiring-ready.
 
 ---
 
@@ -20,28 +20,28 @@
 
 ### Technology & Architecture
 <!-- This is where you document your current tech stack so the AI understands your environment -->
-- **Frameworks & Versions:** TODO: List your main frameworks and versions
-- **Language:** TODO: Specify your programming language and version
-- **Database & ORM:** TODO: Define your database and ORM choice
-- **UI & Styling:** TODO: List your UI framework and styling approach
-- **Authentication:** TODO: Specify your authentication system
-- **Key Architectural Patterns:** TODO: List your main architectural patterns
+- **Frameworks & Versions:** Python 3.12, litellm, sqlmodel, chromadb, rich
+- **Language:** Python
+- **Database & ORM:** SQLite + SQLModel
+- **UI & Styling:** Rich terminal UI
+- **Authentication:** N/A
+- **Key Architectural Patterns:** Facade engine, multi-agent loop, RAG memory
 
 ### Current State
 <!-- Describe what exists today - what's working, what's broken, what's missing -->
-[Analysis of your current codebase state, existing functionality, and what needs to be changed]
+Current repo runs a simulation but lacks a post-run report that explains outcomes (winners, behavior, market dynamics).
 
 ## 3. Context & Problem Definition
 
 ### Problem Statement
 <!-- This is where you clearly define the specific problem you're solving -->
-[Detailed explanation of the problem, including user impact, pain points, and why it needs to be solved now]
+The project lacks readable insights after a run; hiring reviewers can’t easily see outcomes.
 
 ### Success Criteria
 <!-- Define exactly how you'll know when this task is complete and successful -->
-- [ ] [Specific, measurable outcome 1]
-- [ ] [Specific, measurable outcome 2]
-- [ ] [Specific, measurable outcome 3]
+- [ ] Generate a per-run report in `reports/`.
+- [ ] Generate a summary index across runs.
+- [ ] Include winners/losers, ROI, trade volume, and market dynamics plots.
 
 ---
 
@@ -62,18 +62,18 @@
 ### Functional Requirements
 <!-- This is where the AI will understand exactly what the system should do - be specific about user actions and system behaviors -->
 
-TODO: Define what users can do and what the system will automatically handle
+Provide per-run reports and a summary index to explain outcomes.
 - Example format: "User can [specific action]"
 - Example format: "System automatically [specific behavior]" 
 - Example format: "When [condition] occurs, then [system response]"
 
 ### Non-Functional Requirements
 <!-- This is where you define performance, security, and usability standards -->
-- **Performance:** TODO: Define response time and load handling requirements
-- **Security:** TODO: Specify authentication and data protection needs
-- **Usability:** TODO: Set user experience and accessibility standards
-- **Responsive Design:** TODO: Define mobile, tablet, desktop support requirements
-- **Theme Support:** TODO: Specify light/dark mode and brand requirements
+- **Performance:** N/A (analysis task)
+- **Security:** N/A
+- **Usability:** Clear demo and evaluation story
+- **Responsive Design:** N/A
+- **Theme Support:** N/A
 
 ### Technical Constraints
 <!-- This is where you list limitations the AI agent must work within -->
@@ -142,7 +142,7 @@ TODO: Define your state management approach and data flow strategy
 
 ## 9. Implementation Plan
 
-TODO: Break your work into phases with specific tasks and file paths
+1) Add report generator module and CLI.\n2) Wire report generation into simulation runs.\n3) Update README with report usage and locations.
 
 ---
 
@@ -151,13 +151,13 @@ TODO: Break your work into phases with specific tasks and file paths
 ### Real-Time Progress Tracking
 <!-- This is where you tell the AI agent to update progress as work is completed -->
 
-TODO: Define how you want the AI to track and report progress on tasks
+Checklist of report outputs and files.
 
 ---
 
 ## 11. File Structure & Organization
 
-TODO: Plan what new files to create and existing files to modify
+New report generator module and report output directory.
 
 ---
 
@@ -166,7 +166,7 @@ TODO: Plan what new files to create and existing files to modify
 ### Implementation Workflow
 <!-- This is where you give specific instructions to your AI agent -->
 🎯 **MANDATORY PROCESS:**
-TODO:
+Use Context7 for pandas/matplotlib usage.
 
 ### Communication Preferences
 <!-- This is where you set expectations for how the AI should communicate -->

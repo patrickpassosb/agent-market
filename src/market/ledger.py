@@ -9,6 +9,7 @@ from typing import List, Optional
 import logging
 from sqlmodel import SQLModel, Session, create_engine, select
 import os
+import sqlite3
 from .schema import Transaction, InteractionLog
 
 class Ledger:
@@ -36,6 +37,33 @@ class Ledger:
         except Exception:
             logging.exception("Failed to initialize ledger tables")
             raise
+        self._ensure_run_id_column(db_path)
+
+    def _ensure_run_id_column(self, db_path: str) -> None:
+        """
+        Ensure run_id columns exist for backward-compatible migrations.
+        """
+        def ensure_column(cursor, table: str):
+            cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+                (table,),
+            )
+            if cursor.fetchone() is None:
+                return
+            cursor.execute(f'PRAGMA table_info("{table}")')
+            columns = {row[1] for row in cursor.fetchall()}
+            if "run_id" not in columns:
+                cursor.execute(f'ALTER TABLE "{table}" ADD COLUMN run_id TEXT')
+
+        try:
+            with sqlite3.connect(db_path) as conn:  # https://github.com/python/cpython/blob/main/Doc/library/sqlite3.rst (Context7 /python/cpython)
+                cursor = conn.cursor()
+                ensure_column(cursor, "transaction")
+                ensure_column(cursor, "interactionlog")
+                conn.commit()
+        except sqlite3.OperationalError:
+            # Tables may not exist yet; create_all will handle them on next run.
+            return
 
     def record_transaction(self, transaction: Transaction) -> Transaction:
         """

@@ -77,6 +77,10 @@ uv run python src/analysis/chart.py
 ```
 Check the `plots/` directory for `price_history.png`.
 
+### Reports
+
+Each run generates a report in `reports/<run_id>/report.md` plus an index at `reports/index.md`. Disable with `--no-report`.
+
 ### Checkpoints
 
 Checkpoint snapshots (JSON) are written to `checkpoints/` when enabled via `--checkpoint-every`.

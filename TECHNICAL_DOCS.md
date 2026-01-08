@@ -104,6 +104,10 @@ Located in `src/market/ledger.py` and `src/market/schema.py`.
 The simulator can emit JSON checkpoints (market state, agent metrics, recent transactions/interactions)
 to support reproducibility and experiment evidence.
 
+## Reports
+
+Post-run reports are generated in `reports/<run_id>/report.md`, with a summary index at `reports/index.md`.
+
 ## Project Structure
 
 ```

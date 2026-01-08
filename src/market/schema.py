@@ -50,6 +50,7 @@ class Transaction(SQLModel, table=True):
     __table_args__ = {"extend_existing": True}
     
     id: Optional[int] = Field(default=None, primary_key=True, description="Unique Transaction ID")
+    run_id: Optional[str] = Field(default=None, index=True, description="Simulation run identifier")
     buyer_id: str = Field(index=True, description="ID of the buying agent")
     seller_id: str = Field(index=True, description="ID of the selling agent")
     item: str = Field(description="Name of the asset traded")
@@ -94,6 +95,7 @@ class InteractionLog(SQLModel, table=True):  # https://sqlmodel.tiangolo.com/tut
     __table_args__ = {"extend_existing": True}
 
     id: Optional[int] = Field(default=None, primary_key=True, description="Unique Interaction ID")
+    run_id: Optional[str] = Field(default=None, index=True, description="Simulation run identifier")
     agent_id: str = Field(index=True, description="ID of the acting agent")
     kind: str = Field(description="Interaction category (e.g., action, negotiation)")
     action: Optional[str] = Field(default=None, description="Action label, if applicable")
