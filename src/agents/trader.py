@@ -8,7 +8,7 @@ It handles:
 3. Structured Output parsing (using `litellm` and `pydantic`).
 """
 
-from typing import Optional, Literal
+from typing import Optional, Literal, Dict
 import math
 import random
 from pydantic import BaseModel, Field
@@ -16,13 +16,13 @@ import litellm
 from litellm import completion
 from .base import BaseAgent
 from src.market.schema import MarketState, AgentAction, SUPPORTED_ASSETS, QUOTE_CURRENCY
+from src.utils.personas import get_models_for_tier, get_persona_tier
 
 # --- Data Models for LLM Output ---
 
 litellm.enable_json_schema_validation = True
 
 def _parse_structured_response(model_cls: type[BaseModel], content):
-    """Normalize structured LLM output into a Pydantic model."""
     if isinstance(content, model_cls):
         return content
     if isinstance(content, dict):
@@ -105,7 +105,7 @@ class Trader(BaseAgent):
         # Default: no special constraints
         return "Follow your general strategy as described in your persona."
 
-    def act(self, market_state: MarketState, focused_item: str = "AAPL") -> Optional[dict]:
+    def act(self, market_state: MarketState, focused_item: str, all_current_prices: Dict[str, float]) -> Optional[dict]:
         """
         Execute one decision cycle.
         
@@ -117,9 +117,7 @@ class Trader(BaseAgent):
         """
         
         # 1. Get portfolio context
-        # Ideally we would pass all current prices, but for now we approximate using the focused item's price
-        current_prices = {focused_item: market_state.current_price}
-        portfolio_metrics = self.portfolio.get_metrics(current_prices)
+        portfolio_metrics = self.portfolio.get_metrics(all_current_prices)
         
         # 2. Retrieve relevant memories
         recent_memories = self.memory.retrieve_memory("trading decision", n_results=3)
@@ -158,15 +156,33 @@ Ensure your price is in {QUOTE_CURRENCY} (e.g. 0.005).
 
         # 3. Call LLM
         try:
-            # We use litellm's `response_format` to enforce the Pydantic schema
-            response = completion(
-                model=self.model_name,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": f"What is your next move for {focused_item}?"}
-                ],
-                response_format=TraderDecision
-            )
+            tier = get_persona_tier(self.persona)
+            fallback_models = get_models_for_tier(tier)
+            if self.model_name not in fallback_models:
+                fallback_models.insert(0, self.model_name)
+
+            response = None
+            last_error: Exception | None = None
+            # LiteLLM fallbacks per Context7 docs: /websites/litellm_ai (fallbacks + retries).
+            for model in fallback_models:
+                try:
+                    # We use litellm's `response_format` to enforce the Pydantic schema
+                    response = completion(
+                        model=model,
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": f"What is your next move for {focused_item}?"}
+                        ],
+                        response_format=TraderDecision,
+                        num_retries=2,
+                    )
+                    last_error = None
+                    break
+                except Exception as error:
+                    last_error = error
+
+            if response is None:
+                raise last_error or RuntimeError("LLM completion failed across fallback models.")
             
             # 4. Process Response
             content = response.choices[0].message.content

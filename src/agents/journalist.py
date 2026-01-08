@@ -13,7 +13,8 @@ from litellm import completion
 from typing import List, Optional
 import os
 
-from src.market.schema import MarketState, Transaction
+from src.market.schema import MarketState, Transaction, QUOTE_CURRENCY
+from src.utils.personas import get_models_for_tier
 
 litellm.enable_json_schema_validation = True
 
@@ -38,12 +39,13 @@ class JournalistAgent:
     a list of recent `Transaction`s to generate a `JournalistHeadline`.
     
     Attributes:
-        model_name (str): The LLM model used for generation (default: Gemini 1.5 Flash).
+        model_name (str): The LLM model used for generation (default: Gemini 2.5 Flash).
         api_key (str): API key for the model provider.
     """
 
-    def __init__(self, model_name: str = "gemini/gemini-1.5-flash"):
+    def __init__(self, model_name: str = "gemini/gemini-2.5-flash"):
         """Initialize the journalist with a specific model identifier."""
+        # Gemini models use the gemini/ prefix per LiteLLM docs (Context7 /websites/litellm_ai).
         self.model_name = model_name
         self.api_key = os.getenv("GEMINI_API_KEY")
 
@@ -57,36 +59,58 @@ class JournalistAgent:
         bid_count = market_state.order_book_summary["bids_count"]
         ask_count = market_state.order_book_summary["asks_count"]
         
+        # Determine asset from transactions or generic
+        asset = recent_transactions[0].item if recent_transactions else "Market"
+        
         volume = len(recent_transactions)
         trend = "stable"
         if recent_transactions:
-            oldest_first = list(reversed(recent_transactions))
-            first_price = oldest_first[0].price
-            last_price = oldest_first[-1].price
+            # Sort by timestamp to find movement
+            sorted_txs = sorted(recent_transactions, key=lambda x: x.timestamp)
+            first_price = sorted_txs[0].price
+            last_price = sorted_txs[-1].price
             if last_price > first_price: trend = "rising"
             elif last_price < first_price: trend = "falling"
 
         prompt = f"""
-        You are a financial news journalist reporting on a fast-paced market.
+        You are a financial news journalist reporting on a Bitcoin-denominated Stock Exchange.
         
-        Current Market Data:
-        - Price: ${price:.2f}
+        Current Market Data for {asset}:
+        - Price: {price:.6f} {QUOTE_CURRENCY}
         - Trend: {trend}
         - Volume: {volume} trades in the last period.
         - Sentiment: {bid_count} buyers vs {ask_count} sellers.
         
         Write a short, sensational "Breaking News" headline and a brief body explaining the movement.
-        Be dramatic but accurate to the data.
+        Be dramatic but accurate to the data. Remember all assets are priced in {QUOTE_CURRENCY}.
         """
 
         try:
-            response = completion(
-                model=self.model_name,
-                messages=[{"role": "user", "content": prompt}],
-                response_format=JournalistHeadline
-            )
+            fallback_models = get_models_for_tier("analytical")
+            if self.model_name not in fallback_models:
+                fallback_models.insert(0, self.model_name)
+
+            response = None
+            last_error: Exception | None = None
+            # LiteLLM fallbacks per Context7 docs: /websites/litellm_ai (fallbacks + retries).
+            for model in fallback_models:
+                try:
+                    response = completion(
+                        model=model,
+                        messages=[{"role": "user", "content": prompt}],
+                        response_format=JournalistHeadline,
+                        num_retries=2,
+                    )
+                    last_error = None
+                    break
+                except Exception as error:
+                    last_error = error
+
+            if response is None:
+                raise last_error or RuntimeError("LLM completion failed across fallback models.")
+
             content = response.choices[0].message.content
             return _parse_structured_response(JournalistHeadline, content)
         except Exception as e:
             # Fallback if LLM fails
-            return JournalistHeadline(headline="Market Stays Calm", body="Trading continues as usual.")
+            return JournalistHeadline(headline=f"{asset} Activity Recorded", body=f"Trading volume remains steady in the {asset} market.")

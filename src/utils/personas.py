@@ -30,7 +30,10 @@ STRATEGIC_KEYWORDS = ["whale", "market maker"]
 ANALYTICAL_KEYWORDS = ["value", "patient", "long-term", "conservative"]
 RULE_BASED_KEYWORDS = ["algorithmic", "disciplined", "contrarian"]
 
-PROVIDER_ORDER = os.getenv("MODEL_PROVIDER_ORDER", "openrouter,groq,gemini").split(",")
+PROVIDER_ORDER = os.getenv(
+    "MODEL_PROVIDER_ORDER",
+    "ollama,openrouter,groq,gemini",
+).split(",")
 
 # OpenRouter uses OPENROUTER_API_KEY and optional OPENROUTER_API_BASE/OR_* envs.
 # https://github.com/berriai/litellm/blob/main/docs/my-website/docs/providers/openrouter.md (Context7 /berriai/litellm)
@@ -48,11 +51,33 @@ GROQ_MODELS = {
     "fast": "groq/llama-3.1-8b-instant",
 }
 
+# Gemini models use the gemini/ prefix per LiteLLM docs (Context7 /websites/litellm_ai).
 GEMINI_MODELS = {
-    "strategic": "gemini/gemini-1.5-flash",
-    "analytical": "gemini/gemini-1.5-flash",
-    "rule": "gemini/gemini-1.5-flash",
-    "fast": "gemini/gemini-1.5-flash",
+    "strategic": "gemini/gemini-2.5-flash",
+    "analytical": "gemini/gemini-2.5-flash",
+    "rule": "gemini/gemini-2.5-flash",
+    "fast": "gemini/gemini-2.5-flash",
+}
+
+def _ollama_enabled() -> bool:
+    if os.getenv("OLLAMA_ENABLED", "").lower() in {"1", "true", "yes"}:
+        return True
+    return any(
+        os.getenv(name)
+        for name in (
+            "OLLAMA_MODEL_STRATEGIC",
+            "OLLAMA_MODEL_ANALYTICAL",
+            "OLLAMA_MODEL_RULE",
+            "OLLAMA_MODEL_FAST",
+        )
+    )
+
+# Ollama models use the ollama_chat/ prefix per LiteLLM docs (Context7 /websites/litellm_ai).
+OLLAMA_MODELS = {
+    "strategic": os.getenv("OLLAMA_MODEL_STRATEGIC", "ollama_chat/phi3"),
+    "analytical": os.getenv("OLLAMA_MODEL_ANALYTICAL", "ollama_chat/phi3"),
+    "rule": os.getenv("OLLAMA_MODEL_RULE", "ollama_chat/tinyllama"),
+    "fast": os.getenv("OLLAMA_MODEL_FAST", "ollama_chat/tinyllama"),
 }
 
 _ROUND_ROBIN = {"strategic": 0, "analytical": 0, "rule": 0, "fast": 0}
@@ -63,7 +88,9 @@ def _available_models(tier: str) -> list[str]:
     models: list[str] = []
     for provider in PROVIDER_ORDER:
         provider = provider.strip()
-        if provider == "openrouter":
+        if provider == "ollama" and _ollama_enabled():
+            models.append(OLLAMA_MODELS[tier])
+        elif provider == "openrouter":
             model = OPENROUTER_MODELS.get(tier) or OPENROUTER_MODELS.get("fast")
             if model and os.getenv("OPENROUTER_API_KEY"):
                 models.append(model)
@@ -72,6 +99,11 @@ def _available_models(tier: str) -> list[str]:
         elif provider == "gemini" and os.getenv("GEMINI_API_KEY"):
             models.append(GEMINI_MODELS[tier])
     return models
+
+
+def get_models_for_tier(tier: str) -> list[str]:
+    """Expose ordered models for a tier to support fallback retries."""
+    return _available_models(tier)
 
 
 def _choose_model(tier: str) -> str:
@@ -94,6 +126,11 @@ def _persona_tier(persona: str) -> str:
     if any(k in p_lower for k in RULE_BASED_KEYWORDS):
         return "rule"
     return "fast"
+
+
+def get_persona_tier(persona: str) -> str:
+    """Public wrapper for persona tier selection."""
+    return _persona_tier(persona)
 
 def get_model_for_persona(persona: str) -> str:
     """

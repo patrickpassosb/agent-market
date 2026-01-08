@@ -29,7 +29,8 @@ def test_process_action_rejects_invalid_price(temp_db, price):
     result = engine.process_action("agent_1", AgentAction.BUY, "AAPL", price)
 
     assert result is None
-    summary = engine.order_book.get_summary()
+    # Access the specific order book for AAPL
+    summary = engine.order_books["AAPL"].get_summary()
     assert summary["bids_count"] == 0
     assert summary["asks_count"] == 0
 
@@ -41,6 +42,7 @@ def test_process_action_rejects_empty_item(temp_db):
     result = engine.process_action("agent_1", AgentAction.SELL, "", 10.0)
 
     assert result is None
-    summary = engine.order_book.get_summary()
+    # Check any order book (e.g. AAPL) to ensure it's empty
+    summary = engine.order_books["AAPL"].get_summary()
     assert summary["bids_count"] == 0
     assert summary["asks_count"] == 0

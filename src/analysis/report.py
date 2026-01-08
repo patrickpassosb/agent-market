@@ -4,7 +4,7 @@ Post-run report generation for marketplace simulations.
 
 from __future__ import annotations
 
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable, Optional, Dict
 import argparse
 import json
 import os
@@ -14,7 +14,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from sqlmodel import Session, create_engine, select
 
-from src.market.schema import Transaction, InteractionLog, DEFAULT_ITEM
+from src.market.schema import Transaction, InteractionLog, SUPPORTED_ASSETS
 
 
 def _to_dataframe(items: Iterable[Any]) -> pd.DataFrame:
@@ -64,11 +64,11 @@ def _markdown_table(df: pd.DataFrame, columns: list[str]) -> str:
     return "\n".join([headers, divider, *rows])
 
 
-def _build_agent_summary(agents: Iterable[Any], current_price: float) -> pd.DataFrame:
+def _build_agent_summary(agents: Iterable[Any], current_prices: Dict[str, float]) -> pd.DataFrame:
     """Compute per-agent portfolio metrics at the end of a run."""
     rows = []
     for agent in agents:
-        metrics = agent.portfolio.get_metrics({DEFAULT_ITEM: current_price})
+        metrics = agent.portfolio.get_metrics(current_prices)
         rows.append(
             {
                 "agent_id": agent.id,
@@ -139,7 +139,7 @@ def generate_report(
     db_path: str,
     report_root: str,
     agents: Iterable[Any],
-    current_price: float,
+    current_prices: Dict[str, float],
 ) -> str:
     """
     Generate a report for a single run. Returns report directory path.
@@ -153,7 +153,7 @@ def generate_report(
     tx_df = _to_dataframe(transactions)
     interactions_df = _to_dataframe(interactions)
 
-    agent_df = _build_agent_summary(agents, current_price)
+    agent_df = _build_agent_summary(agents, current_prices)
     trade_activity_df = _build_trade_activity(tx_df)
     action_activity_df = _build_action_activity(interactions_df)
     market_summary = _summarize_market(tx_df)
@@ -161,12 +161,14 @@ def generate_report(
     plot_paths = {}
     if transactions:
         fig, ax = plt.subplots(figsize=(10, 4))
-        times = [tx.timestamp for tx in transactions]
-        prices = [tx.price for tx in transactions]
-        ax.plot(times, prices, label="Trade Price")
+        # Plot each asset separately or just the main ones
+        for asset in tx_df["item"].unique():
+            asset_tx = tx_df[tx_df["item"] == asset]
+            ax.plot(pd.to_datetime(asset_tx["timestamp"]), asset_tx["price"], label=f"{asset} Price")
+        
         ax.set_title("Price Over Time")
         ax.set_xlabel("Time")
-        ax.set_ylabel("Price")
+        ax.set_ylabel("Price (BTC)")
         ax.grid(True, alpha=0.3)
         ax.legend(loc="upper left")
         price_path = os.path.join(report_dir, "price_history.png")
@@ -194,11 +196,10 @@ def generate_report(
     report_lines.append("## Market Summary")
     report_lines.append("")
     report_lines.append(f"- Total trades: {market_summary['total_trades']}")
-    report_lines.append(f"- Avg price: {market_summary['avg_price']}")
-    report_lines.append(f"- Min price: {market_summary['min_price']}")
-    report_lines.append(f"- Max price: {market_summary['max_price']}")
-    report_lines.append(f"- Volatility (std): {market_summary['volatility']}")
-    report_lines.append(f"- Top agent: {top_agent} (ROI {top_roi})")
+    report_lines.append(f"- Avg price: {market_summary['avg_price']:.6f} BTC")
+    report_lines.append(f"- Min price: {market_summary['min_price']:.6f} BTC")
+    report_lines.append(f"- Max price: {market_summary['max_price']:.6f} BTC")
+    report_lines.append(f"- Top agent: {top_agent} (ROI {top_roi:.1f}%)")
     report_lines.append("")
 
     if plot_paths.get("price_history"):
@@ -297,7 +298,7 @@ def parse_args():
 def main():
     """CLI entry point for manual report generation."""
     args = parse_args()
-    generate_report(args.run_id, args.db_path, args.report_root, agents=[], current_price=0.0)
+    generate_report(args.run_id, args.db_path, args.report_root, agents=[], current_prices={})
 
 
 if __name__ == "__main__":

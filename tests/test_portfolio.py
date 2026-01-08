@@ -10,9 +10,9 @@ class TestPortfolio:
     """Unit tests for Portfolio P/L tracking"""
     
     def test_initialization(self):
-        """Test portfolio starts with correct defaults"""
+        """Test portfolio starts with correct defaults (BTC)"""
         p = Portfolio()
-        assert p.cash == 10000.0
+        assert p.cash == 1.5
         assert len(p.positions) == 0
         assert p.realized_pnl == 0.0
     
@@ -53,7 +53,7 @@ class TestPortfolio:
         success = p.execute_sell("AAPL", 10, 50.0)
         
         assert success is False
-        assert p.cash == 10000.0  # Unchanged
+        assert p.cash == 1.5  # Unchanged default
     
     def test_pnl_calculation(self):
         """Test profit/loss tracking"""
@@ -90,15 +90,21 @@ class TestPortfolio:
         assert p.get_portfolio_value(current_prices) == 1100.0
     
     def test_roi_calculation(self):
-        """Test ROI percentage"""
-        p = Portfolio(cash=10000.0)
-        p.execute_buy("AAPL", 100, 50.0)  # Spend $5000
+        """Test ROI percentage (based on 1.5 BTC initial)"""
+        p = Portfolio(cash=1.5)
+        # To test simple ROI, we simulate a profit.
+        # Let's say we buy 1 AAPL for 0.5 BTC, and it goes to 1.0 BTC.
+        p.execute_buy("AAPL", 1, 0.5)
         
-        current_prices = {"AAPL": 60.0}  # Price rises to $60
+        current_prices = {"AAPL": 1.0}
         
         metrics = p.get_metrics(current_prices)
         
-        # P/L: (60 - 50) * 100 = $1000
-        # ROI: (1000 / 10000) * 100 = 10%
-        assert metrics["total_pnl"] == 1000.0
-        assert metrics["roi"] == 10.0
+        # Initial: 1.5
+        # Cost: 0.5 -> Cash: 1.0
+        # Value: 1 * 1.0 = 1.0
+        # Total Value: 2.0
+        # Profit: 0.5
+        
+        # ROI: (0.5 / 1.5) * 100 = 33.33...
+        assert abs(metrics["roi"] - 33.333) < 0.001

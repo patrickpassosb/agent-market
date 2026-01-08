@@ -49,7 +49,11 @@ class TestTrader:
         )
         
         trader = Trader("agent_1", "Test persona", "groq/llama-3.1-8b-instant")
-        decision = trader.act(mock_market_state)
+        decision = trader.act(
+            market_state=mock_market_state, 
+            focused_item="AAPL",
+            all_current_prices={"AAPL": 10.0}
+        )
         
         assert decision is not None
         assert decision["action"] == AgentAction.BUY
@@ -63,7 +67,11 @@ class TestTrader:
         mock_completion.side_effect = Exception("API Error")
         
         trader = Trader("agent_1", "Test persona", "groq/llama-3.1-8b-instant")
-        decision = trader.act(mock_market_state)
+        decision = trader.act(
+            market_state=mock_market_state,
+            focused_item="AAPL",
+            all_current_prices={"AAPL": 10.0}
+        )
         
         # Should return None or default action, not crash
         assert decision is None or isinstance(decision, dict)
@@ -80,7 +88,11 @@ class TestTrader:
         )
         
         trader = Trader("agent_1", "Patient investor", "groq/llama-3.1-8b-instant")
-        decision = trader.act(mock_market_state)
+        decision = trader.act(
+            market_state=mock_market_state,
+            focused_item="AAPL",
+            all_current_prices={"AAPL": 10.0}
+        )
         
         # Reflection returns a dict but with REFLECTION action
         assert decision is not None
@@ -98,7 +110,11 @@ class TestTrader:
         )
 
         trader = Trader("agent_1", "Test persona", "groq/llama-3.1-8b-instant")
-        decision = trader.act(mock_market_state)
+        decision = trader.act(
+            market_state=mock_market_state,
+            focused_item="AAPL",
+            all_current_prices={"AAPL": 10.0}
+        )
 
         assert decision is not None
         assert decision["action"] == AgentAction.BUY

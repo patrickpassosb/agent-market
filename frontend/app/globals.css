@@ -1,0 +1,50 @@
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap");
+@import "tailwindcss";
+
+:root {
+  --background: #05070f;
+  --foreground: #e2e8f0;
+  --font-sans: "Space Grotesk", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", "SFMono-Regular", Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+}
+
+/* Base layer styling per Tailwind @layer guidance from Context7: /tailwindlabs/tailwindcss.com preflight docs. */
+@layer base {
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    min-height: 100vh;
+  }
+}
+
+body {
+  background-image: linear-gradient(
+      120deg,
+      rgba(56, 189, 248, 0.08),
+      transparent 55%
+    ),
+    linear-gradient(240deg, rgba(16, 185, 129, 0.08), transparent 50%),
+    repeating-linear-gradient(
+      90deg,
+      rgba(148, 163, 184, 0.05) 0,
+      rgba(148, 163, 184, 0.05) 1px,
+      transparent 1px,
+      transparent 64px
+    ),
+    repeating-linear-gradient(
+      0deg,
+      rgba(148, 163, 184, 0.05) 0,
+      rgba(148, 163, 184, 0.05) 1px,
+      transparent 1px,
+      transparent 64px
+    );
+}

@@ -225,9 +225,9 @@ def main():
 
     recent_actions = deque(maxlen=200)
     
-    # Initialize Journalist (TODO: Journalist needs update for multi-asset too, but we leave as is for now)
-    # from src.agents.journalist import JournalistAgent
-    # journalist = JournalistAgent()  # Defaults to Gemini
+    # Initialize Journalist
+    from src.agents.journalist import JournalistAgent
+    journalist = JournalistAgent()  # Defaults to Gemini
 
     # 2. Execution Loop
     with Live(layout, refresh_per_second=4, screen=True) as live:
@@ -238,11 +238,11 @@ def main():
                 start_time = time.time()
             
                 # --- JOURNALIST UPDATE ---
-                # if tick % 10 == 0:
-                #     recent_txns = engine.ledger.get_transactions(limit=20)
-                #     # TODO: Pass full state or focused state
-                #     news = journalist.analyze(engine.get_state("AAPL"), recent_txns)
-                #     layout["news_flash"].update(Panel(f"[bold]{news.headline}[/bold]\n{news.body}", title="BREAKING NEWS", style="bold red"))
+                if tick % 10 == 0:
+                    recent_txns = engine.ledger.get_transactions(limit=20)
+                    # For news, we pick the most active asset or just the first one for now
+                    news = journalist.analyze(engine.get_state(SUPPORTED_ASSETS[0]), recent_txns)
+                    layout["news_flash"].update(Panel(f"[bold]{news.headline}[/bold]\n{news.body}", title="BREAKING NEWS", style="bold red"))
             
                 # Shuffle agents so they act in random order (fairness in sequential processing)
                 random.shuffle(agents)
@@ -254,7 +254,7 @@ def main():
                     
                     # Agent perceives state of that asset, retrieves memory, and decides
                     state = engine.get_state(focused_asset)
-                    decision = agent.act(state, focused_item=focused_asset)
+                    decision = agent.act(state, focused_item=focused_asset, all_current_prices=engine.current_prices)
                     
                     if decision:
                         # Negotiate a counter-offer if quotes are far from the submitted price
@@ -316,24 +316,31 @@ def main():
                 time.sleep(sleep_time)
 
                 # --- CHECKPOINTS ---
-                # if args.checkpoint_every and tick % args.checkpoint_every == 0:
-                    # TODO: Update checkpoint builder for multi-asset
-                    # pass
+                if args.checkpoint_every and tick % args.checkpoint_every == 0:
+                    payload = build_checkpoint(
+                        tick=tick,
+                        current_prices=engine.current_prices,
+                        agents=agents,
+                        transactions=engine.ledger.get_transactions(limit=args.checkpoint_transactions),
+                        interactions=engine.ledger.get_interactions(limit=args.checkpoint_interactions),
+                    )
+                    filename = f"checkpoint_{tick:06d}.json"
+                    path = write_checkpoint(payload, args.checkpoint_dir, filename)
+                    logging.info(f"CHECKPOINT: {path}")
 
                 if args.max_ticks and tick >= args.max_ticks:
                     logging.info(f"Simulation completed after {tick} ticks.")
                     break
         finally:
             if not args.no_report:
-                # TODO: Update report generator for multi-asset
-                # report_dir = generate_report(
-                #     run_id=run_id,
-                #     db_path="market.db",
-                #     report_root=args.report_dir,
-                #     agents=agents,
-                #     current_price=engine.last_price, # Engine no longer has single last_price
-                # )
-                logging.info(f"Report generation temporarily disabled for multi-asset refactor.")
+                report_dir = generate_report(
+                    run_id=run_id,
+                    db_path="market.db",
+                    report_root=args.report_dir,
+                    agents=agents,
+                    current_prices=engine.current_prices,
+                )
+                logging.info(f"REPORT: {report_dir}")
 
 if __name__ == "__main__":
     try:
