@@ -9,29 +9,32 @@ from abc import ABC, abstractmethod
 from typing import Optional
 from src.market.schema import MarketState, AgentAction, Transaction
 from src.memory.memory import AgentMemory
+from src.agents.portfolio import Portfolio
 
 class BaseAgent(ABC):
     """
-    Abstract Base Class for autonomous agents.
+    Abstract base class for all trading agents.
     
-    Attributes:
-        id (str): Unique identifier for the agent.
-        persona (str): A natural language description of the agent's behavior/strategy.
-        memory (AgentMemory): A handle to the agent's long-term memory (vector DB).
+    Defines the common interface and shared utilities for agents in the simulation.
+    All agents have:
+    - A unique ID
+    - A persona/strategy description
+    - Access to a long-term memory system (via ChromaDB)
+    - A portfolio to track wealth and positions
     """
 
     def __init__(self, agent_id: str, persona: str):
         """
-        Initialize the base agent.
-        
         Args:
-            agent_id (str): Unique ID.
-            persona (str): Description of the agent's character.
+            agent_id (str): Unique identifier for this agent.
+            persona (str): Natural language description of the agent's trading strategy.
         """
         self.id = agent_id
         self.persona = persona
         # Initialize memory system for this specific agent
         self.memory = AgentMemory(agent_id=agent_id)
+        # Initialize portfolio for this specific agent
+        self.portfolio = Portfolio()
 
     @abstractmethod
     def act(self, market_state: MarketState) -> Optional[dict]:

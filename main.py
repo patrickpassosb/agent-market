@@ -1,15 +1,16 @@
 """
-Agent Market Simulation Entry Point.
+Multi-Agent Marketplace Simulation - Entry Point.
 
-This script orchestrates the entire simulation. It is responsible for:
-1. **Setup**: initializing the Market Engine and populating the world with Agents.
-2. **Execution Loop**: driving the simulation tick-by-tick.
-3. **Visualization**: rendering the real-time TUI (Text User Interface) using `rich`.
-4. **Logging**: persisting events to disk for post-hoc analysis.
+This script orchestrates the entire market simulation. It:
+1. Initializes a MarketEngine (orderbook + ledger).
+2. Creates multiple trading agents with diverse personas and LLMs.
+3. Runs a simulation loop where agents observe, decide, and act.
+4. Displays live updates using the Rich library for a dynamic terminal UI.
 
 Usage:
-    Run directly via Python:
-    $ uv run main.py
+    python main.py
+
+Stop the simulation with Ctrl+C (SIGINT). The script will handle graceful shutdown.
 """
 
 import os
@@ -26,6 +27,14 @@ from rich.table import Table
 from rich.layout import Layout
 from rich.console import Console
 from rich.panel import Panel
+import litellm
+import logging
+
+# Suppress LiteLLM verbose logging completely
+litellm.set_verbose = False
+os.environ["LITELLM_LOG"] = "CRITICAL"  # Only critical errors
+logging.getLogger("LiteLLM").setLevel(logging.CRITICAL)
+logging.getLogger("litellm").setLevel(logging.CRITICAL)
 
 from src.market.engine import MarketEngine
 from src.agents.trader import Trader
@@ -201,8 +210,9 @@ def main():
                 
                 if decision:
                     # Execute action against the market engine
+                    # Now passes the full agent object (for portfolio access)
                     tx = engine.process_action(
-                        agent.id, 
+                        agent,  # Changed from agent.id
                         decision["action"], 
                         decision["item"], 
                         decision["price"]

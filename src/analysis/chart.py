@@ -1,3 +1,17 @@
+"""
+Market Analysis and Visualization.
+
+This module provides tools to query the persistent `Ledger` (SQLite) and generate 
+visualizations of the simulation results.
+
+It produces:
+1. Price History (Time vs Price).
+2. Agent Activity (Volume per Agent).
+
+Usage:
+    Run manually after a simulation to generate reports in the `plots/` directory.
+"""
+
 import sqlite3
 import pandas as pd
 import matplotlib.pyplot as plt

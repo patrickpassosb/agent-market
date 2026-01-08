@@ -56,15 +56,20 @@ class MarketEngine:
             order_book_summary=summary
         )
 
-    def process_action(self, agent_id: str, action: AgentAction, item: str = "apple", price: float = 0.0) -> Optional[Transaction]:
+    def process_action(self, agent: Any, action: AgentAction, item: str = "apple", price: float = 0.0) -> Optional[Transaction]:
         """
         Processes an action submitted by an agent.
         
-        This is the primary "write" operation of the API.
+        This method acts as the central transaction coordinator. It:
+        1. Validates the input arguments.
+        2. Routes the order to the `OrderBook`.
+        3. If a match occurs, it validates the trade against the agent's `Portfolio`.
+        4. If valid, records the transaction in the `Ledger`.
         
         Args:
-            agent_id (str): ID of the agent acting.
-            action (AgentAction): The type of action (BUY, SELL, HOLD).
+            agent (BaseAgent): The agent instance submitting the action. 
+                               Must have a `portfolio` attribute.
+            action (AgentAction): The type of action (BUY, SELL, HOLD, REFLECTION).
             item (str): The asset involved (default "apple").
             price (float): The limit price for the order.
             
@@ -85,13 +90,41 @@ class MarketEngine:
 
         # Route action to the appropriate OrderBook method
         if action == AgentAction.BUY:
-            transaction = self.order_book.add_buy(agent_id, item, float(price))
+            transaction = self.order_book.add_buy(agent.id, item, float(price))
+            
+            # If trade matched, execute against portfolio
+            if transaction:
+                # Portfolio validation: Check if agent has enough cash
+                success = agent.portfolio.execute_buy(
+                    item=transaction.item,
+                    quantity=1,  # TODO: Support variable quantities
+                    price=transaction.price
+                )
+                
+                if not success:
+                    # Rollback: Insufficient funds, cancel the trade
+                    # In a real system we'd need to put the order back on the book
+                    return None
+                    
         elif action == AgentAction.SELL:
-            transaction = self.order_book.add_sell(agent_id, item, float(price))
+            transaction = self.order_book.add_sell(agent.id, item, float(price))
+            
+            # If trade matched, execute against portfolio
+            if transaction:
+                # Portfolio validation: Check if agent has the asset
+                success = agent.portfolio.execute_sell(
+                    item=transaction.item,
+                    quantity=1,
+                    price=transaction.price
+                )
+                
+                if not success:
+                    # Rollback: Insufficient inventory
+                    return None
         else:
             return None
 
-        # If the order resulted in a trade
+        # If the order resulted in a trade AND portfolio execution succeeded
         if transaction:
             # 1. Persist to DB
             self.ledger.record_transaction(transaction)

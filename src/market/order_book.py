@@ -37,9 +37,29 @@ class OrderBook:
         self.asks: Dict[str, List[Tuple[float, float, str]]] = {}
 
     def _get_bids(self, item: str) -> List[Tuple[float, float, str]]:
+        """
+        Retrieve the bid heap for a specific item. 
+        Creates a new list if one doesn't exist.
+        
+        Args:
+            item (str): The asset identifier.
+            
+        Returns:
+            List: The heap list for bids on this item.
+        """
         return self.bids.setdefault(item, [])
 
     def _get_asks(self, item: str) -> List[Tuple[float, float, str]]:
+        """
+        Retrieve the ask heap for a specific item. 
+        Creates a new list if one doesn't exist.
+        
+        Args:
+            item (str): The asset identifier.
+            
+        Returns:
+            List: The heap list for asks on this item.
+        """
         return self.asks.setdefault(item, [])
 
     def add_buy(self, agent_id: str, item: str, price: float) -> Optional[Transaction]:

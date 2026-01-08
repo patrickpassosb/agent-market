@@ -1,3 +1,12 @@
+"""
+Journalist Agent Implementation.
+
+This module defines the `JournalistAgent`, a specialized observer agent that 
+monitors the market state and generates "Breaking News" headlines. 
+It adds narrative flavor to the simulation by converting raw data (price, volume, sentiment) 
+into human-readable financial news.
+"""
+
 from pydantic import BaseModel, Field
 import litellm
 from litellm import completion
@@ -20,6 +29,17 @@ class JournalistHeadline(BaseModel):
     body: str = Field(description="A 2-sentence summary of the market sentiment.")
 
 class JournalistAgent:
+    """
+    An AI-powered observer that narrates the market.
+    
+    This agent does not trade. Instead, it consumes the global `MarketState` and 
+    a list of recent `Transaction`s to generate a `JournalistHeadline`.
+    
+    Attributes:
+        model_name (str): The LLM model used for generation (default: Gemini 1.5 Flash).
+        api_key (str): API key for the model provider.
+    """
+
     def __init__(self, model_name: str = "gemini/gemini-1.5-flash"):
         self.model_name = model_name
         self.api_key = os.getenv("GEMINI_API_KEY")

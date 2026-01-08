@@ -67,6 +67,40 @@ class Trader(BaseAgent):
         """
         super().__init__(agent_id, persona)
         self.model_name = model_name
+    
+    def _get_persona_constraints(self) -> str:
+        """
+        Return specific behavioral rules based on persona type.
+        This helps enforce persona adherence.
+        """
+        p_lower = self.persona.lower()
+        
+        # Panic sellers MUST sell on drops
+        if "panic" in p_lower:
+            return "CRITICAL: You MUST sell immediately if the current price is below your average cost."
+        
+        # Contrarians MUST go against the majority
+        elif "contrar" in p_lower:
+            return "CRITICAL: You MUST trade AGAINST the majority. If bids > asks, you MUST sell. If asks > bids, you MUST buy."
+        
+        # Market makers MUST provide liquidity on both sides
+        elif "market maker" in p_lower:
+            return "CRITICAL: Your goal is to profit from the spread. You should place BOTH a buy order below market and a sell order above market."
+        
+        # FOMO buyers buy on spikes
+        elif "fomo" in p_lower:
+            return "You are driven by fear of missing out. Buy aggressively when prices are rising."
+        
+        # Conservative investors only buy dips
+        elif "conservative" in p_lower or "long-term" in p_lower:
+            return "You only buy when prices are significantly below historical averages. Be patient and selective."
+        
+        # DCA buyers buy every tick
+        elif "dca" in p_lower or "dollar cost" in p_lower:
+            return "You MUST buy a small amount every single tick, regardless of price."
+        
+        # Default: no special constraints
+        return "Follow your general strategy as described in your persona."
 
     def act(self, market_state: MarketState) -> Optional[dict]:
         """
@@ -79,26 +113,41 @@ class Trader(BaseAgent):
         4. Parse & Log: Validate output, store reasoning in memory, and return action.
         """
         
-        # 1. Retrieve relevant memories (RAG - Retrieval Augmented Generation)
-        # We query for general strategy to see if the agent has formed past rules.
-        recent_memories = self.memory.retrieve_memory("market strategy", n_results=3)
-        memory_context = "\n".join(recent_memories) if recent_memories else "No specific recent memories."
+        # 1. Get portfolio context
+        current_prices = {"apple": market_state.current_price}  # TODO: Multi-asset
+        portfolio_metrics = self.portfolio.get_metrics(current_prices)
+        
+        # 2. Retrieve relevant memories
+        recent_memories = self.memory.retrieve_memory("trading decision", n_results=3)
+        memory_context = "\n".join(recent_memories) if recent_memories else "No past trades recorded."
 
-        # 2. Construct System Prompt
-        # We explicitly state the persona and current objective data.
+        # 3. Get persona-specific constraints
+        constraints = self._get_persona_constraints()
+
+        # 4. Construct enhanced system prompt
         system_prompt = f"""You are a trading agent in a market simulation.
 Your ID: {self.id}
 Your Persona: {self.persona}
+{constraints}
 
 Current Market State:
-Price: {market_state.current_price}
-Order Book: {market_state.order_book_summary}
+- Price: ${market_state.current_price:.2f}
+- Best Bid: {market_state.order_book_summary.get('best_bid', 'N/A')}
+- Best Ask: {market_state.order_book_summary.get('best_ask', 'N/A')}
+- Buy Orders: {market_state.order_book_summary.get('bids_count', 0)}
+- Sell Orders: {market_state.order_book_summary.get('asks_count', 0)}
 
-Your recent memories:
+Your Portfolio:
+- Cash: ${portfolio_metrics['cash']:.2f}
+- Positions: {portfolio_metrics['positions']}
+- Total P/L: ${portfolio_metrics['total_pnl']:.2f}
+- ROI: {portfolio_metrics['roi']:.1f}%
+
+Recent Trading History:
 {memory_context}
 
-Goal: Maximize profit based on your persona.
-Decide your next action: BUY, SELL, HOLD, or REFLECTION.
+Goal: Maximize profit while STRICTLY following your persona constraints.
+Decide: BUY, SELL, HOLD, or REFLECTION (internal thought only).
 """
 
         # 3. Call LLM

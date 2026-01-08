@@ -7,10 +7,10 @@
 ## 1. Task Overview
 
 ### Task Title
-**Title:** Codebase Review for Quality, Performance, and Risk
+**Title:** Repo Cleanup Review for Unnecessary Files and Redundancy
 
 ### Goal Statement
-**Goal:** Analyze the current codebase and deliver a prioritized review of issues and improvements across quality, performance, best practices, potential bugs, security, and maintainability, with concrete examples or changes where relevant.
+**Goal:** Identify unnecessary or redundant files, suggest removals or consolidations, and propose project-structure improvements that reduce clutter and improve maintainability without breaking core behavior.
 
 ---
 
@@ -30,12 +30,12 @@ Core simulation loop in `main.py` with agents calling LiteLLM; in-memory order b
 ## 3. Context & Problem Definition
 
 ### Problem Statement
-The user requests a senior-level code review with prioritized findings and actionable recommendations, focusing on quality, performance, best practices, bugs/edge cases, security, and maintainability.
+The user requests a focused review to spot unnecessary files and redundancy, plus suggestions for pruning and organizing the project for better structure and code quality.
 
 ### Success Criteria
-- [ ] Fix item-aware matching, LLM structured output parsing, trend direction, ledger init error handling, action log growth, and input validation.
-- [ ] Add tests covering multi-item matching, dict content parsing, trend ordering, and invalid prices.
-- [ ] All High/Medium/Low findings addressed without breaking core behavior.
+- [ ] Provide a prioritized list of files/directories that are likely artifacts or redundant, with evidence or reasoning.
+- [ ] Recommend safe removals, consolidations, or moves, including any required updates to docs or config.
+- [ ] Suggest structural improvements to reduce duplication and improve maintainability.
 
 ---
 
@@ -53,12 +53,12 @@ The user requests a senior-level code review with prioritized findings and actio
 ## 5. Technical Requirements
 
 ### Functional Requirements
-- Review existing code; do not add new features.
+- Review repository contents to identify unnecessary files and redundancy.
 
 ### Non-Functional Requirements
-- **Performance:** Highlight hotspots or avoidable inefficiencies.
-- **Security:** Identify vulnerabilities or unsafe patterns.
-- **Usability:** Note confusing APIs or sharp edges.
+- **Performance:** Optional if any redundancy impacts performance or startup time.
+- **Security:** Flag sensitive artifacts committed accidentally.
+- **Usability:** Identify confusing structure or duplicated docs.
 - **Responsive Design:** N/A unless frontend present.
 - **Theme Support:** N/A unless frontend present.
 
@@ -109,11 +109,9 @@ N/A
 
 ## 9. Implementation Plan
 
-1. Update OrderBook structure for item-aware matching and summary.
-2. Harden LLM structured output parsing in Trader and Journalist.
-3. Fix trend ordering and ledger init error handling.
-4. Add validation + bounded action log storage.
-5. Add tests for new edge cases.
+1. Inventory repo files and identify generated artifacts, caches, logs, and outputs.
+2. Cross-check references in code/docs/config to avoid false positives.
+3. Deliver prioritized cleanup recommendations with rationale and any needed updates.
 
 ---
 

@@ -82,18 +82,25 @@ uv run pytest --cov=src --cov-report=html
 open htmlcov/index.html
 ```
 
+## 📚 Documentation
+
+Detailed documentation is available in the `docs/` folder and project root:
+
+-   **[System Architecture](docs/ARCHITECTURE.md)**: High-level system design, data flow diagrams, and component breakdown.
+-   **[Technical Docs](TECHNICAL_DOCS.md)**: Deep dive into the Hybrid LLM Strategy, Persona mappings, and Database Schema.
+-   **[Deployment Guide](DEPLOYMENT.md)**: Instructions for Docker, Cloud Run, and Streamlit deployment.
+
 ## 🧠 Architecture
 
-### The Agents
-Agents are defined in `src/agents/trader.py`. They abide by a **Sense-Think-Act** loop:
-1.  **Sense:** Read Market State (Order Book) + Local Memory (ChromaDB).
-2.  **Think:** Send structured prompt to assigned LLM.
-3.  **Act:** Output JSON decision (`BUY`, `SELL`, `HOLD`).
+The system follows a **Facade-based architecture** where the central `MarketEngine` mediates all interactions between the autonomous **Agents** and the **Order Book**.
 
-### The Market
-The `MarketEngine` (`src/market/engine.py`) maintains the "Physics" of the world:
--   **Double Auction Order Book**: Matches highest bidder with lowest seller.
--   **Ledger**: SQL-based immutable record of all transactions.
+> **See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for full diagrams and details.**
+
+### Core Loop
+1.  **Sense:** Agents receive the current `MarketState` (Price, L1 Order Book).
+2.  **Think:** Agents query their Vector Memory (ChromaDB) for past lessons, then send a prompt to their assigned LLM.
+3.  **Act:** Agents submit a structured JSON decision (`BUY`, `SELL`, `HOLD`).
+4.  **Execute:** The Market Engine matches orders and persists trades to the Ledger.
 
 ## 📦 Tech Stack
 -   **Orchestration**: `python`, `uv`

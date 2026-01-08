@@ -9,19 +9,26 @@ Non-optional rules to ensure: documented assumptions, structured planning, corre
 ## 1) Mandatory Context7
 
 Agent MUST use Context7 MCP for:
-
 * Code generation
 * Setup/config steps
 * Library/framework/API/SDK usage
 * Dependency decisions
 * CLI commands for tools/frameworks
-* Any “how to use X” documentation
+* Any "how to use X" documentation
 
 Rules:
-
 * Never rely on memory for library/API behavior.
 * Resolve library ID + fetch docs via Context7 before implementation.
-* If Context7 is unavailable: stop and state it cannot proceed.
+
+**Fallback Strategy (If Context7 Unavailable):**
+1. Notify user: "Context7 unavailable, using [fallback method]"
+2. Attempt web search for official docs
+3. If both fail: stop and request user guidance
+
+**Verification After Context7:**
+- Cross-check returned docs against implementation
+- Cite the specific Context7 source in code comments
+- Note any API version constraints discovered
 
 ---
 
@@ -35,7 +42,6 @@ Rules:
 * **Reuse an existing task** if it already covers the request.
 * If a task exists but needs small changes, **edit the existing task** instead of creating a new one.
 * Create a new task only when no existing task fits.
-* Tasks must be numbered sequentially (e.g., task_1_, task_2_) and placed in .agent/tasks/
 
 ---
 
@@ -73,7 +79,7 @@ Agent MUST minimize tokens:
 ## 6) Task Reuse & Modification Policy
 
 - If an existing task fully or partially covers the current request, Agent MUST reuse it.
-- If the task is mostly correct but incomplete or outdated, Agent MUST update the existing task.
+- If the task is mostly correct but incomplete or outdated, Agent- MUST update the existing task.
 - Create a new task ONLY when:
   - The goal is materially different, or
   - Success criteria no longer overlap, or
@@ -91,3 +97,4 @@ Unplanned work is a bug. Documentation-less assumptions are debt. Context-free c
 ---
 
 If you need context go to the /context folder and ask for me
+
