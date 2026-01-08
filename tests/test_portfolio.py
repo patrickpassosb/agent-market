@@ -1,3 +1,7 @@
+"""
+Tests for Portfolio accounting behavior.
+"""
+
 import pytest
 from src.agents.portfolio import Portfolio
 

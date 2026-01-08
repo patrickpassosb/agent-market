@@ -6,12 +6,12 @@ To maximize performance within rate limits and budget, we employ a tiered model 
 
 | Agent Archetype | Model | Reasoning |
 | :--- | :--- | :--- |
-| **Whales / Market Makers** | `llama-3.3-70b-versatile` | Requires high reasoning to manipulate markets and manage large capital. |
-| **Value Investors** | `gemini-1.5-flash` | Needs large context window to analyze price history and trends effectively. |
-| **Algorithmic Traders** | `groq/llama-3.1-8b-instant` or OpenRouter/Gemini | Routed across available providers to reduce free-tier limits. |
-| **Retail / FOMO** | `llama-3.1-8b-instant` | Needs speed and low latency; "vibes based" trading doesn't require deep reasoning. |
+| **Whales / Market Makers** | OpenRouter/Groq/Gemini (strategic tier) | High reasoning tier; routed across providers to reduce free-tier limits. |
+| **Value Investors** | OpenRouter/Groq/Gemini (analytical tier) | Long-context/analysis tier; routed across providers. |
+| **Algorithmic Traders** | OpenRouter/Groq/Gemini (rule tier) | Rule-following tier; routed across providers. |
+| **Retail / FOMO** | OpenRouter/Groq/Gemini (fast tier) | Fast, low-cost tier for reactive agents. |
 
-*Implemented in `src/utils/personas.py:get_model_for_persona()`*
+*Implemented in `src/utils/personas.py:get_model_for_persona()` with provider rotation controlled by `MODEL_PROVIDER_ORDER`.*
 
 ## System Architecture
 
@@ -70,6 +70,10 @@ Acts as a **Facade** over the `OrderBook` and `Ledger`.
 -   **Ledger (`src/market/ledger.py`)**: SQLModel persistence to `market.db`.
 -   **Negotiation (`src/market/engine.py`)**: Generates counter-offer prices using current best quotes.
 
+### Provider Routing (`src/utils/personas.py`)
+
+Model selection is tiered by persona and rotated across OpenRouter/Groq/Gemini providers based on `MODEL_PROVIDER_ORDER`. OpenAI is disabled by default unless explicitly re-enabled.
+
 ### Intelligent Agents (`src/agents/trader.py`)
 
 -   **Inputs**: `MarketState` and `Portfolio`.
@@ -92,11 +96,13 @@ Located in `src/memory/memory.py`.
 ### 2. Transaction Ledger (SQLite/SQLModel)
 Located in `src/market/ledger.py`.
 -   **Schema:** `Transaction` table (id, timestamp, buyer_id, seller_id, price).
+-   **Run IDs:** `run_id` tags each record to connect transactions to a single simulation run.
 -   **Purpose:** The source of truth for the `JournalistAgent` and `chart.py` analysis.
 
 ### 3. Interaction Ledger (SQLite/SQLModel)
 Located in `src/market/ledger.py` and `src/market/schema.py`.
 -   **Schema:** `InteractionLog` table (id, timestamp, agent_id, kind, action, item, price, details).
+-   **Run IDs:** `run_id` tags each record for per-run reporting.
 -   **Purpose:** Persistent audit trail for agent actions and negotiation events.
 
 ## Checkpoints

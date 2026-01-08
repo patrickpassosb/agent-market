@@ -21,7 +21,7 @@ class Portfolio(BaseModel):
     
     model_config = ConfigDict()  # Pydantic v2 config style per https://github.com/pydantic/pydantic/blob/main/docs/concepts/config.md (Context7 /pydantic/pydantic)
 
-    cash: float = Field(default=10000.0, description="Available cash balance")
+    cash: float = Field(default=1.5, description="Available cash balance (BTC)")
     positions: Dict[str, int] = Field(default_factory=dict, description="Holdings: {item: quantity}")
     realized_pnl: float = Field(default=0.0, description="Locked-in profit/loss from closed positions")
     trades_count: int = Field(default=0, description="Total number of trades executed")
@@ -122,7 +122,7 @@ class Portfolio(BaseModel):
         Return performance metrics for analytics.
         """
         total_pnl = self.get_total_pnl(current_prices)
-        initial_capital = 10000.0
+        initial_capital = 1.5  # BTC
         
         return {
             "cash": self.cash,

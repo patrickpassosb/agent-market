@@ -10,12 +10,14 @@ It utilizes:
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 from pydantic import BaseModel
 from sqlmodel import Field, SQLModel
 
-DEFAULT_ITEM = "apple"  # Module-level constant; see https://github.com/python/cpython/blob/main/Doc/tutorial/modules.rst (Context7 /python/cpython)
+# Base Currency Configuration
+QUOTE_CURRENCY = "BTC"
+SUPPORTED_ASSETS = ["AAPL", "TSLA", "NVDA", "MSFT"]
 
 class AgentAction(str, Enum):
     """

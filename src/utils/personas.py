@@ -59,6 +59,7 @@ _ROUND_ROBIN = {"strategic": 0, "analytical": 0, "rule": 0, "fast": 0}
 
 
 def _available_models(tier: str) -> list[str]:
+    """Return provider models available for a tier based on configured keys."""
     models: list[str] = []
     for provider in PROVIDER_ORDER:
         provider = provider.strip()
@@ -74,6 +75,7 @@ def _available_models(tier: str) -> list[str]:
 
 
 def _choose_model(tier: str) -> str:
+    """Round-robin select a model for a tier from available providers."""
     candidates = _available_models(tier)
     if not candidates:
         return GROQ_MODELS["fast"]
@@ -83,6 +85,7 @@ def _choose_model(tier: str) -> str:
 
 
 def _persona_tier(persona: str) -> str:
+    """Classify a persona into a routing tier."""
     p_lower = persona.lower()
     if any(k in p_lower for k in STRATEGIC_KEYWORDS):
         return "strategic"

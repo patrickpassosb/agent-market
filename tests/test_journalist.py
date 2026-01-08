@@ -1,3 +1,7 @@
+"""
+Tests for the JournalistAgent narrative generation.
+"""
+
 from unittest.mock import Mock, patch
 
 from src.agents.journalist import JournalistAgent
@@ -5,6 +9,7 @@ from src.market.schema import MarketState, Transaction
 
 
 def _make_market_state():
+    """Return a minimal MarketState with stable book values."""
     return MarketState(
         current_price=10.0,
         order_book_summary={"best_bid": 9.0, "best_ask": 11.0, "bids_count": 1, "asks_count": 1}
@@ -13,9 +18,11 @@ def _make_market_state():
 
 @patch("src.agents.journalist.completion")
 def test_analyze_trend_rising_from_desc_order(mock_completion):
+    """Ensure trend detection handles newest-first transactions."""
     captured = {}
 
     def _mock_completion(**kwargs):
+        """Capture prompt content and return a fixed response."""
         captured["prompt"] = kwargs["messages"][0]["content"]
         return Mock(choices=[Mock(message=Mock(content={"headline": "h", "body": "b"}))])
 

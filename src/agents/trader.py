@@ -10,17 +10,19 @@ It handles:
 
 from typing import Optional, Literal
 import math
+import random
 from pydantic import BaseModel, Field
 import litellm
 from litellm import completion
 from .base import BaseAgent
-from src.market.schema import MarketState, AgentAction, DEFAULT_ITEM
+from src.market.schema import MarketState, AgentAction, SUPPORTED_ASSETS, QUOTE_CURRENCY
 
 # --- Data Models for LLM Output ---
 
 litellm.enable_json_schema_validation = True
 
 def _parse_structured_response(model_cls: type[BaseModel], content):
+    """Normalize structured LLM output into a Pydantic model."""
     if isinstance(content, model_cls):
         return content
     if isinstance(content, dict):
@@ -36,10 +38,10 @@ class TraderDecision(BaseModel):
         description="The action to take. 'reflection' is for internal thought only."
     )
     item: str = Field(
-        description="The item to trade, typically 'apple' in this simulation."
+        description=f"The ticker symbol to trade. Must be one of {SUPPORTED_ASSETS}."
     )
     price: float = Field(
-        description="The limit price for the order. Set to 0.0 if holding or reflecting."
+        description=f"The limit price for the order in {QUOTE_CURRENCY}."
     )
     reasoning: str = Field(
         description="A concise explanation (under 1 sentence) for this decision."
@@ -103,7 +105,7 @@ class Trader(BaseAgent):
         # Default: no special constraints
         return "Follow your general strategy as described in your persona."
 
-    def act(self, market_state: MarketState) -> Optional[dict]:
+    def act(self, market_state: MarketState, focused_item: str = "AAPL") -> Optional[dict]:
         """
         Execute one decision cycle.
         
@@ -115,7 +117,8 @@ class Trader(BaseAgent):
         """
         
         # 1. Get portfolio context
-        current_prices = {DEFAULT_ITEM: market_state.current_price}  # TODO: Multi-asset
+        # Ideally we would pass all current prices, but for now we approximate using the focused item's price
+        current_prices = {focused_item: market_state.current_price}
         portfolio_metrics = self.portfolio.get_metrics(current_prices)
         
         # 2. Retrieve relevant memories
@@ -126,22 +129,23 @@ class Trader(BaseAgent):
         constraints = self._get_persona_constraints()
 
         # 4. Construct enhanced system prompt
-        system_prompt = f"""You are a trading agent in a market simulation.
+        system_prompt = f"""You are a trading agent in a Bitcoin-denominated Stock Market.
 Your ID: {self.id}
 Your Persona: {self.persona}
 {constraints}
 
-Current Market State:
-- Price: ${market_state.current_price:.2f}
+Focus Asset: {focused_item}
+Current Market State ({focused_item}/{QUOTE_CURRENCY}):
+- Price: {market_state.current_price:.6f} {QUOTE_CURRENCY}
 - Best Bid: {market_state.order_book_summary.get('best_bid', 'N/A')}
 - Best Ask: {market_state.order_book_summary.get('best_ask', 'N/A')}
 - Buy Orders: {market_state.order_book_summary.get('bids_count', 0)}
 - Sell Orders: {market_state.order_book_summary.get('asks_count', 0)}
 
 Your Portfolio:
-- Cash: ${portfolio_metrics['cash']:.2f}
+- Cash: {portfolio_metrics['cash']:.4f} {QUOTE_CURRENCY}
 - Positions: {portfolio_metrics['positions']}
-- Total P/L: ${portfolio_metrics['total_pnl']:.2f}
+- Total P/L: {portfolio_metrics['total_pnl']:.4f} {QUOTE_CURRENCY}
 - ROI: {portfolio_metrics['roi']:.1f}%
 
 Recent Trading History:
@@ -149,6 +153,7 @@ Recent Trading History:
 
 Goal: Maximize profit while STRICTLY following your persona constraints.
 Decide: BUY, SELL, HOLD, or REFLECTION (internal thought only).
+Ensure your price is in {QUOTE_CURRENCY} (e.g. 0.005).
 """
 
         # 3. Call LLM
@@ -158,7 +163,7 @@ Decide: BUY, SELL, HOLD, or REFLECTION (internal thought only).
                 model=self.model_name,
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": "What is your next move?"}
+                    {"role": "user", "content": f"What is your next move for {focused_item}?"}
                 ],
                 response_format=TraderDecision
             )
@@ -169,14 +174,18 @@ Decide: BUY, SELL, HOLD, or REFLECTION (internal thought only).
             # Validate JSON against Pydantic model
             decision = _parse_structured_response(TraderDecision, content)
             
+            # Validation: Ensure item is correct
+            if decision.item != focused_item:
+                decision.item = focused_item # Force correct item if LLM hallucinates
+
             if decision.action in ("buy", "sell"):
                 if not math.isfinite(decision.price) or decision.price <= 0:
                     # Ensure tradable prices to avoid zero-trade runs (Context7 /python/cpython https://github.com/python/cpython/blob/main/Doc/library/math.rst)
-                    decision.price = market_state.current_price if market_state.current_price > 0 else 1.0
+                    decision.price = market_state.current_price if market_state.current_price > 0 else 0.001
 
             # Log the reasoning to the agent's internal long-term memory
             # This allows the agent to "remember" why it did something in future turns.
-            self.remember(f"Decided to {decision.action} at {decision.price}: {decision.reasoning}")
+            self.remember(f"Decided to {decision.action} {decision.item} at {decision.price}: {decision.reasoning}")
 
             # Convert string action to internal Enum
             action_enum = AgentAction(decision.action)

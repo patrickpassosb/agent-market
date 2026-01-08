@@ -31,6 +31,7 @@ class OrderBook:
     """
 
     def __init__(self):
+        """Initialize empty bid/ask heaps per item."""
         # Buy orders: Max-heap per item (store negative price to simulate max-heap with python's min-heap)
         self.bids: Dict[str, List[Tuple[float, float, str]]] = {}
         # Sell orders: Min-heap per item

@@ -44,6 +44,7 @@ class Ledger:
         Ensure run_id columns exist for backward-compatible migrations.
         """
         def ensure_column(cursor, table: str):
+            """Add run_id column to a table if it exists and lacks it."""
             cursor.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
                 (table,),

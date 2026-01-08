@@ -1,3 +1,7 @@
+"""
+Tests for Ledger persistence and retrieval.
+"""
+
 import pytest
 import os
 import tempfile

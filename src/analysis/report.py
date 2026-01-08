@@ -26,6 +26,7 @@ def _to_dataframe(items: Iterable[Any]) -> pd.DataFrame:
 
 
 def _load_transactions(db_path: str, run_id: Optional[str]) -> list[Transaction]:
+    """Load transactions for a run from the SQLite ledger."""
     engine = create_engine(f"sqlite:///{db_path}")
     with Session(engine) as session:
         statement = select(Transaction)
@@ -36,6 +37,7 @@ def _load_transactions(db_path: str, run_id: Optional[str]) -> list[Transaction]
 
 
 def _load_interactions(db_path: str, run_id: Optional[str]) -> list[InteractionLog]:
+    """Load interaction logs for a run from the SQLite ledger."""
     engine = create_engine(f"sqlite:///{db_path}")
     with Session(engine) as session:
         statement = select(InteractionLog)
@@ -46,11 +48,13 @@ def _load_interactions(db_path: str, run_id: Optional[str]) -> list[InteractionL
 
 
 def _write_plot(path: str, fig) -> None:
+    """Persist a Matplotlib figure to disk."""
     fig.savefig(path, dpi=200, bbox_inches="tight")  # https://github.com/matplotlib/matplotlib/blob/main/galleries/users_explain/figure/figure_intro.rst (Context7 /matplotlib/matplotlib)
     plt.close(fig)
 
 
 def _markdown_table(df: pd.DataFrame, columns: list[str]) -> str:
+    """Render a DataFrame subset as a Markdown table without pandas extras."""
     if df.empty:
         return "No data."
     subset = df[columns].fillna("")
@@ -61,6 +65,7 @@ def _markdown_table(df: pd.DataFrame, columns: list[str]) -> str:
 
 
 def _build_agent_summary(agents: Iterable[Any], current_price: float) -> pd.DataFrame:
+    """Compute per-agent portfolio metrics at the end of a run."""
     rows = []
     for agent in agents:
         metrics = agent.portfolio.get_metrics({DEFAULT_ITEM: current_price})
@@ -83,6 +88,7 @@ def _build_agent_summary(agents: Iterable[Any], current_price: float) -> pd.Data
 
 
 def _build_trade_activity(tx_df: pd.DataFrame) -> pd.DataFrame:
+    """Aggregate trade counts per agent from transaction data."""
     if tx_df.empty:
         return pd.DataFrame(columns=["agent_id", "trade_count"])
     buyers = tx_df["buyer_id"].value_counts().rename("trade_count")
@@ -93,6 +99,7 @@ def _build_trade_activity(tx_df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _build_action_activity(interactions_df: pd.DataFrame) -> pd.DataFrame:
+    """Aggregate action counts per agent from interaction logs."""
     if interactions_df.empty:
         return pd.DataFrame(columns=["agent_id", "action_count"])
     actions = interactions_df[interactions_df["kind"] == "action"]
@@ -104,6 +111,7 @@ def _build_action_activity(interactions_df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _summarize_market(tx_df: pd.DataFrame) -> dict:
+    """Summarize market-level stats from transaction data."""
     if tx_df.empty:
         return {
             "total_trades": 0,
@@ -122,6 +130,7 @@ def _summarize_market(tx_df: pd.DataFrame) -> dict:
 
 
 def _ensure_dir(path: str) -> None:
+    """Create output directory if it does not exist."""
     os.makedirs(path, exist_ok=True)  # https://github.com/python/cpython/blob/main/Doc/faq/library.rst (Context7 /python/cpython)
 
 
@@ -249,6 +258,7 @@ def generate_report(
 
 
 def _update_index(report_root: str, summary: dict) -> None:
+    """Update JSON and Markdown indices for report summaries."""
     index_json = os.path.join(report_root, "index.json")
     entries = []
     if os.path.exists(index_json):
@@ -273,6 +283,7 @@ def _update_index(report_root: str, summary: dict) -> None:
 
 
 def parse_args():
+    """Parse CLI args for report generation."""
     parser = argparse.ArgumentParser(
         description="Generate a post-run report",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -284,6 +295,7 @@ def parse_args():
 
 
 def main():
+    """CLI entry point for manual report generation."""
     args = parse_args()
     generate_report(args.run_id, args.db_path, args.report_root, agents=[], current_price=0.0)
 

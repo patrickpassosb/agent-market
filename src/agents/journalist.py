@@ -18,6 +18,7 @@ from src.market.schema import MarketState, Transaction
 litellm.enable_json_schema_validation = True
 
 def _parse_structured_response(model_cls: type[BaseModel], content):
+    """Normalize structured LLM output into a Pydantic model."""
     if isinstance(content, model_cls):
         return content
     if isinstance(content, dict):
@@ -25,6 +26,7 @@ def _parse_structured_response(model_cls: type[BaseModel], content):
     return model_cls.model_validate_json(content)
 
 class JournalistHeadline(BaseModel):
+    """Structured output format for journalist responses."""
     headline: str = Field(description="A short, catchy news headline about the market state.")
     body: str = Field(description="A 2-sentence summary of the market sentiment.")
 
@@ -41,6 +43,7 @@ class JournalistAgent:
     """
 
     def __init__(self, model_name: str = "gemini/gemini-1.5-flash"):
+        """Initialize the journalist with a specific model identifier."""
         self.model_name = model_name
         self.api_key = os.getenv("GEMINI_API_KEY")
 

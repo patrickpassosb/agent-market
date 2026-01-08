@@ -1,6 +1,10 @@
 # Agent Market Simulation
 
-A multi-agent marketplace simulation where autonomous agents trade, negotiate, and adapt using LLM-driven strategies. The project is built for the Multi-Agent Marketplace Simulation Challenge and emphasizes traceability, reproducibility, and post-run insights.
+A multi-agent marketplace simulation where autonomous agents trade, negotiate, and adapt using LLM-driven strategies. Built for the Multi-Agent Marketplace Simulation Challenge to demonstrate autonomous agent behavior, observability, and reproducibility.
+
+## Purpose
+
+Simulate a functioning marketplace with multiple autonomous agents, then provide clear evidence of behavior (logs, reports, checkpoints) so evaluators can understand outcomes and system dynamics.
 
 ## Overview
 
@@ -48,7 +52,8 @@ pip install -r requirements.txt
 Copy `.env.example` to `.env` and add keys:
 - `GROQ_API_KEY`
 - `GEMINI_API_KEY`
-- `OPENAI_API_KEY` (optional)
+- `OPENAI_API_KEY` (optional; not used by default)
+ - `OPENROUTER_API_KEY` and `OPENROUTER_MODEL_*` if using OpenRouter
 
 ### Run
 ```bash
@@ -101,6 +106,13 @@ OpenAI is intentionally disabled by default; keep `OPENAI_API_KEY` only if you w
 
 Default OpenRouter models in `.env.example` are free-tier `:free` variants; you can swap them anytime from https://openrouter.ai/models.
 
+### Environment Variables
+
+Core config in `.env`:
+- `MODEL_PROVIDER_ORDER` controls provider rotation order.
+- `OPENROUTER_MODEL_STRATEGIC|ANALYTICAL|RULE|FAST` set per-tier models.
+- `MARKET_DATABASE_PATH` and `CHROMA_DB_PATH` control persistence locations.
+
 ## Tech Stack
 
 - Python 3.12
@@ -120,3 +132,18 @@ Default OpenRouter models in `.env.example` are free-tier `:free` variants; you 
 
 - Agent Laboratory: https://agentlaboratory.github.io/
 - Generative Agents: https://github.com/joonspk-research/generative_agents
+
+## Development
+
+Run tests:
+```bash
+uv run pytest tests/ -v
+```
+
+## Reproducibility
+
+Docker is available for consistent runs:
+```bash
+docker build -t agent-market .
+docker run --env-file .env agent-market
+```

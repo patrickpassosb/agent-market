@@ -1,3 +1,7 @@
+"""
+Tests for MarketEngine validation and routing behavior.
+"""
+
 import os
 import tempfile
 
@@ -9,6 +13,7 @@ from src.market.schema import AgentAction
 
 @pytest.fixture
 def temp_db():
+    """Create a temporary SQLite database file for tests."""
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
     yield path
@@ -18,6 +23,7 @@ def temp_db():
 
 @pytest.mark.parametrize("price", [-1.0, 0.0, float("nan"), float("inf")])
 def test_process_action_rejects_invalid_price(temp_db, price):
+    """Ensure invalid prices are rejected without touching the order book."""
     engine = MarketEngine(temp_db)
 
     result = engine.process_action("agent_1", AgentAction.BUY, "AAPL", price)
@@ -29,6 +35,7 @@ def test_process_action_rejects_invalid_price(temp_db, price):
 
 
 def test_process_action_rejects_empty_item(temp_db):
+    """Ensure empty item names are rejected without touching the order book."""
     engine = MarketEngine(temp_db)
 
     result = engine.process_action("agent_1", AgentAction.SELL, "", 10.0)

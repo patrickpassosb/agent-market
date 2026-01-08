@@ -1,3 +1,7 @@
+"""
+Tests for Trader decision-making and error handling.
+"""
+
 import pytest
 from unittest.mock import Mock, patch
 from src.agents.trader import Trader
@@ -25,12 +29,12 @@ class TestTrader:
         trader = Trader(
             agent_id="test_agent",
             persona="A cautious value investor",
-            model_name="gpt-4o-mini"
+            model_name="groq/llama-3.1-8b-instant"
         )
         
         assert trader.id == "test_agent"
         assert trader.persona == "A cautious value investor"
-        assert trader.model_name == "gpt-4o-mini"
+        assert trader.model_name == "groq/llama-3.1-8b-instant"
     
     @patch('src.agents.trader.completion')
     def test_act_returns_valid_decision(self, mock_completion, mock_market_state):
@@ -44,7 +48,7 @@ class TestTrader:
             )]
         )
         
-        trader = Trader("agent_1", "Test persona", "gpt-4o-mini")
+        trader = Trader("agent_1", "Test persona", "groq/llama-3.1-8b-instant")
         decision = trader.act(mock_market_state)
         
         assert decision is not None
@@ -58,7 +62,7 @@ class TestTrader:
         # Mock LLM failure
         mock_completion.side_effect = Exception("API Error")
         
-        trader = Trader("agent_1", "Test persona", "gpt-4o-mini")
+        trader = Trader("agent_1", "Test persona", "groq/llama-3.1-8b-instant")
         decision = trader.act(mock_market_state)
         
         # Should return None or default action, not crash
@@ -75,7 +79,7 @@ class TestTrader:
             )]
         )
         
-        trader = Trader("agent_1", "Patient investor", "gpt-4o-mini")
+        trader = Trader("agent_1", "Patient investor", "groq/llama-3.1-8b-instant")
         decision = trader.act(mock_market_state)
         
         # Reflection returns a dict but with REFLECTION action
@@ -93,7 +97,7 @@ class TestTrader:
             )]
         )
 
-        trader = Trader("agent_1", "Test persona", "gpt-4o-mini")
+        trader = Trader("agent_1", "Test persona", "groq/llama-3.1-8b-instant")
         decision = trader.act(mock_market_state)
 
         assert decision is not None

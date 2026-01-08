@@ -39,7 +39,7 @@ logging.getLogger("litellm").setLevel(logging.CRITICAL)
 
 from src.market.engine import MarketEngine
 from src.agents.trader import Trader
-from src.market.schema import AgentAction, Transaction, ActionLog, InteractionLog, DEFAULT_ITEM
+from src.market.schema import AgentAction, Transaction, ActionLog, InteractionLog, SUPPORTED_ASSETS, QUOTE_CURRENCY
 from src.utils.personas import PERSONAS, get_model_for_persona
 from src.utils.checkpoints import build_checkpoint, write_checkpoint
 from src.analysis.report import generate_report
@@ -81,26 +81,40 @@ def generate_layout() -> Layout:
     )
     return layout
 
-def create_market_table(state) -> Panel:
+def create_market_table(engine: MarketEngine) -> Panel:
     """
     Renders the Market Status panel. 
+    Now iterates through all SUPPORTED_ASSETS to show a multi-asset view.
     
     Args:
-        state (MarketState): Current state of the market.
+        engine (MarketEngine): The engine instance containing all states.
     """
-    table = Table(title="Market Status")
-    table.add_column("Metric", style="cyan")
-    table.add_column("Value", style="magenta")
+    table = Table(title=f"Market Status ({QUOTE_CURRENCY})")
+    table.add_column("Asset", style="bold yellow")
+    table.add_column("Price", style="bold cyan")
+    table.add_column("Spread", style="dim")
+    table.add_column("Depth (B/A)", style="white")
     
-    table.add_row("Current Price", f"${state.current_price:.2f}")
+    for asset in SUPPORTED_ASSETS:
+        state = engine.get_state(asset)
+        obs = state.order_book_summary
+        
+        # Calculate Spread
+        bid = obs.get("best_bid")
+        ask = obs.get("best_ask")
+        spread = f"{(ask - bid):.5f}" if (bid and ask) else "-"
+        
+        # Format Price
+        price_display = f"{state.current_price:.5f}"
+        
+        table.add_row(
+            asset,
+            price_display,
+            spread,
+            f"{obs.get('bids_count')}/{obs.get('asks_count')}"
+        )
     
-    obs = state.order_book_summary
-    table.add_row("Best Bid", str(obs.get("best_bid")) if obs.get("best_bid") else "-")
-    table.add_row("Best Ask", str(obs.get("best_ask")) if obs.get("best_ask") else "-")
-    table.add_row("Bids Count", str(obs.get("bids_count")))
-    table.add_row("Asks Count", str(obs.get("asks_count")))
-    
-    return Panel(table, title="Order Book & Price")
+    return Panel(table, title="Live Ticker")
 
 def create_activity_table(agents: List[Trader], recent_actions: Iterable[ActionLog]) -> Panel:
     """
@@ -136,7 +150,7 @@ def create_activity_table(agents: List[Trader], recent_actions: Iterable[ActionL
         table.add_row(
             f"{act.agent_id} ({model_display})",
             f"[{color}]{act.action.value.upper()}[/{color}]",
-            f"{act.reasoning} (@ {act.price})"
+            f"{act.reasoning} (@ {act.price:.5f})"
         )
     
     return Panel(table, title="Live Feed")
@@ -154,8 +168,8 @@ def parse_args():
     parser.add_argument("--checkpoint-dir", type=str, default="checkpoints", help="Directory for checkpoint JSON files.")
     parser.add_argument("--checkpoint-transactions", type=int, default=50, help="Transactions to include in checkpoints.")
     parser.add_argument("--checkpoint-interactions", type=int, default=100, help="Interactions to include in checkpoints.")
-    parser.add_argument("--initial-price", type=float, default=100.0, help="Seed price for the first tick.")  # https://github.com/python/cpython/blob/main/Doc/library/argparse.rst (Context7 /python/cpython)
-    parser.add_argument("--seed-inventory", type=int, default=1, help="Initial units assigned to each agent.")  # https://github.com/python/cpython/blob/main/Doc/library/argparse.rst (Context7 /python/cpython)
+    parser.add_argument("--initial-price", type=float, default=0.005, help="Seed price for the first tick (BTC).")  # https://github.com/python/cpython/blob/main/Doc/library/argparse.rst (Context7 /python/cpython)
+    parser.add_argument("--seed-inventory", type=int, default=10, help="Initial units assigned to each agent per asset.")  # https://github.com/python/cpython/blob/main/Doc/library/argparse.rst (Context7 /python/cpython)
     parser.add_argument("--report-dir", type=str, default="reports", help="Directory for post-run reports.")
     parser.add_argument("--no-report", action="store_true", help="Disable post-run report generation.")
     return parser.parse_args()
@@ -164,6 +178,9 @@ def parse_args():
 # --- Main Simulation Loop ---
 
 def main():
+    """
+    Run the simulation loop, wiring UI, agents, and reporting.
+    """
     # 1. Setup & Initialization
     args = parse_args()
     
@@ -195,20 +212,22 @@ def main():
         
         agent = Trader(agent_id=agent_id, persona=persona, model_name=model)
         if args.seed_inventory > 0:
-            agent.portfolio.seed_position(DEFAULT_ITEM, args.seed_inventory, args.initial_price)
+            # Seed inventory for ALL supported assets
+            for asset in SUPPORTED_ASSETS:
+                agent.portfolio.seed_position(asset, args.seed_inventory, args.initial_price)
         agents.append(agent)
     
     # Initialize UI
     layout = generate_layout()
-    layout["header"].update(Panel("Agent Market Simulation - AI Traders (Hybrid Models)", style="bold blue"))
+    layout["header"].update(Panel(f"Agent Market Simulation - {QUOTE_CURRENCY} Denominated Stock Exchange", style="bold blue"))
     layout["news_flash"].update(Panel("Market Opening...", title="BREAKING NEWS", style="bold red"))
     layout["footer"].update(Panel("Press Ctrl+C to stop", style="dim"))
 
     recent_actions = deque(maxlen=200)
     
-    # Initialize Journalist
-    from src.agents.journalist import JournalistAgent
-    journalist = JournalistAgent()  # Defaults to Gemini
+    # Initialize Journalist (TODO: Journalist needs update for multi-asset too, but we leave as is for now)
+    # from src.agents.journalist import JournalistAgent
+    # journalist = JournalistAgent()  # Defaults to Gemini
 
     # 2. Execution Loop
     with Live(layout, refresh_per_second=4, screen=True) as live:
@@ -218,23 +237,24 @@ def main():
                 tick += 1
                 start_time = time.time()
             
-                # --- MARKET TICK ---
-                market_state = engine.get_state()
-            
                 # --- JOURNALIST UPDATE ---
-                if tick % 10 == 0:
-                    # Get last 20 txns for context
-                    recent_txns = engine.ledger.get_transactions(limit=20)
-                    news = journalist.analyze(market_state, recent_txns)
-                    layout["news_flash"].update(Panel(f"[bold]{news.headline}[/bold]\n{news.body}", title="BREAKING NEWS", style="bold red"))
+                # if tick % 10 == 0:
+                #     recent_txns = engine.ledger.get_transactions(limit=20)
+                #     # TODO: Pass full state or focused state
+                #     news = journalist.analyze(engine.get_state("AAPL"), recent_txns)
+                #     layout["news_flash"].update(Panel(f"[bold]{news.headline}[/bold]\n{news.body}", title="BREAKING NEWS", style="bold red"))
             
                 # Shuffle agents so they act in random order (fairness in sequential processing)
                 random.shuffle(agents)
             
             # --- PHASE 2: THINK & ACT ---
                 for agent in agents:
-                    # Agent perceives state, retrieves memory, and decides
-                    decision = agent.act(market_state)
+                    # Randomly pick an asset to focus on for this turn
+                    focused_asset = random.choice(SUPPORTED_ASSETS)
+                    
+                    # Agent perceives state of that asset, retrieves memory, and decides
+                    state = engine.get_state(focused_asset)
+                    decision = agent.act(state, focused_item=focused_asset)
                     
                     if decision:
                         # Negotiate a counter-offer if quotes are far from the submitted price
@@ -252,9 +272,8 @@ def main():
                             )
 
                         # Execute action against the market engine
-                        # Now passes the full agent object (for portfolio access)
                         tx = engine.process_action(
-                            agent,  # Changed from agent.id
+                            agent, 
                             decision["action"], 
                             decision["item"], 
                             decision["price"]
@@ -271,7 +290,7 @@ def main():
                         
                         # --- PHASE 3: LOG & PERSIST ---
                         # Persist log to file
-                        logging.info(f"AGENT: {agent.id} | ACTION: {decision['action'].value} | PRICE: {decision['price']} | REASON: {decision['reasoning']}")
+                        logging.info(f"AGENT: {agent.id} | ITEM: {decision['item']} | ACTION: {decision['action'].value} | PRICE: {decision['price']} | REASON: {decision['reasoning']}")
                         engine.ledger.record_interaction(
                             InteractionLog(
                                 run_id=run_id,
@@ -288,7 +307,7 @@ def main():
 
                 # --- PHASE 4: VISUALIZE ---
                 # Update the UI components with the new state
-                layout["market_status"].update(create_market_table(engine.get_state()))
+                layout["market_status"].update(create_market_table(engine))
                 layout["recent_activity"].update(create_activity_table(agents, recent_actions))
                 
                 # Control simulation speed
@@ -297,31 +316,24 @@ def main():
                 time.sleep(sleep_time)
 
                 # --- CHECKPOINTS ---
-                if args.checkpoint_every and tick % args.checkpoint_every == 0:
-                    payload = build_checkpoint(
-                        tick=tick,
-                        market_state=market_state,
-                        agents=agents,
-                        transactions=engine.ledger.get_transactions(limit=args.checkpoint_transactions),
-                        interactions=engine.ledger.get_interactions(limit=args.checkpoint_interactions),
-                    )
-                    filename = f"checkpoint_{tick:06d}.json"
-                    path = write_checkpoint(payload, args.checkpoint_dir, filename)
-                    logging.info(f"CHECKPOINT: {path}")
+                # if args.checkpoint_every and tick % args.checkpoint_every == 0:
+                    # TODO: Update checkpoint builder for multi-asset
+                    # pass
 
                 if args.max_ticks and tick >= args.max_ticks:
                     logging.info(f"Simulation completed after {tick} ticks.")
                     break
         finally:
             if not args.no_report:
-                report_dir = generate_report(
-                    run_id=run_id,
-                    db_path="market.db",
-                    report_root=args.report_dir,
-                    agents=agents,
-                    current_price=engine.last_price,
-                )
-                logging.info(f"REPORT: {report_dir}")
+                # TODO: Update report generator for multi-asset
+                # report_dir = generate_report(
+                #     run_id=run_id,
+                #     db_path="market.db",
+                #     report_root=args.report_dir,
+                #     agents=agents,
+                #     current_price=engine.last_price, # Engine no longer has single last_price
+                # )
+                logging.info(f"Report generation temporarily disabled for multi-asset refactor.")
 
 if __name__ == "__main__":
     try:
