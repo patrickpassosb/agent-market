@@ -1,10 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { LineData, UTCTimestamp } from "lightweight-charts";
 import AgentFeed from "./AgentFeed";
 import MarketWatch from "./MarketWatch";
-import RealtimeChart from "./RealtimeChart";
+import TerminalFeed from "./TerminalFeed";
 
 type Ticker = "AAPL" | "TSLA" | "NVDA" | "MSFT";
 
@@ -70,7 +69,7 @@ const normalizeAgentFeed = (agents: AgentRecord[]): AgentFeedItem[] => {
 export default function Dashboard() {
   const [tickers, setTickers] = useState<TickerMap>(DEFAULT_TICKERS);
   const [previousTickers, setPreviousTickers] = useState<TickerMap>(DEFAULT_TICKERS);
-  const [latestPoint, setLatestPoint] = useState<LineData | null>(null);
+  const [terminalLines, setTerminalLines] = useState<string[]>([]);
   const [agentFeed, setAgentFeed] = useState<AgentFeedItem[]>([]);
   const [status, setStatus] = useState<
     "connecting" | "live" | "reconnecting" | "error"
@@ -120,6 +119,7 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
+    // useEffect cleanup pattern per React docs (Context7 /websites/react_dev).
     let socket: WebSocket | null = null;
     let reconnectTimer: number | undefined;
     let isActive = true;
@@ -148,12 +148,13 @@ export default function Dashboard() {
               setPreviousTickers(prev);
               const merged = { ...prev, ...next };
               const value = merged[chartSymbol];
-              const point: LineData = {
-                time: Math.floor(Date.now() / 1000) as UTCTimestamp,
-                value,
-              };
-              setLatestPoint(point);
-              setLastUpdate(new Date().toLocaleTimeString());
+              const timestamp = new Date().toLocaleTimeString();
+              const line = [
+                `[${timestamp}]`,
+                ...TICKERS.map((ticker) => `${ticker} ${merged[ticker].toFixed(4)}`),
+              ].join(" ");
+              setTerminalLines((lines) => [...lines.slice(-39), line]);
+              setLastUpdate(timestamp);
               return merged;
             });
           }
@@ -212,7 +213,7 @@ export default function Dashboard() {
             />
           </div>
           <div className="rounded-3xl border border-white/10 bg-white/10 p-6 backdrop-blur-2xl">
-            <RealtimeChart latestPoint={latestPoint} symbol={chartSymbol} />
+            <TerminalFeed lines={terminalLines} title={`${chartSymbol} Live Feed`} />
           </div>
         </div>
 

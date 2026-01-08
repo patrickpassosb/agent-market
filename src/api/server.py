@@ -13,10 +13,16 @@ import threading
 import time
 import random
 from typing import List, Dict
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
+
+from dotenv import load_dotenv
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+
+# Load .env early so provider routing config is available during imports.
+# load_dotenv() per python-dotenv docs (Context7 /theskumar/python-dotenv).
+load_dotenv()
 
 from src.market.engine import MarketEngine
 from src.agents.trader import Trader
@@ -174,11 +180,15 @@ sim = SimulationRunner()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Lifespan handler per Context7 FastAPI docs: /websites/fastapi_tiangolo (lifespan events).
-    # Startup
     sim.start()
-    yield
-    # Shutdown
-    sim.stop()
+    broadcast_task = asyncio.create_task(broadcast_loop())
+    try:
+        yield
+    finally:
+        broadcast_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await broadcast_task
+        sim.stop()
 
 app = FastAPI(title="Agent Market API", lifespan=lifespan)
 
@@ -228,10 +238,6 @@ async def broadcast_loop():
             await manager.broadcast(payload)
         
         await asyncio.sleep(0.5) # Update frontend every 500ms
-
-@app.on_event("startup")
-async def start_broadcast():
-    asyncio.create_task(broadcast_loop())
 
 # --- Endpoints ---
 
