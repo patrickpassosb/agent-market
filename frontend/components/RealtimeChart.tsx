@@ -3,11 +3,13 @@
 import { useEffect, useRef } from "react";
 import {
   createChart,
-  LineSeries,
+  AreaSeries,
   type IChartApi,
   type ISeriesApi,
   type LineData,
   type UTCTimestamp,
+  ColorType,
+  CrosshairMode,
 } from "lightweight-charts";
 
 type RealtimeChartProps = {
@@ -18,51 +20,65 @@ type RealtimeChartProps = {
 export default function RealtimeChart({ latestPoint, symbol }: RealtimeChartProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
-  const seriesRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const seriesRef = useRef<ISeriesApi<"Area"> | null>(null);
 
   useEffect(() => {
     if (!containerRef.current) return;
 
-    // Chart setup per Context7 docs: /tradingview/lightweight-charts (v5 addSeries).
     const chart = createChart(containerRef.current, {
       layout: {
-        background: { type: "solid", color: "rgba(8, 12, 24, 0.6)" },
-        textColor: "#d1fae5",
+        background: { type: ColorType.Solid, color: "transparent" },
+        textColor: "rgba(255, 255, 255, 0.5)",
+        fontFamily: "'Inter', sans-serif",
       },
       grid: {
-        vertLines: { color: "rgba(148, 163, 184, 0.1)" },
-        horzLines: { color: "rgba(148, 163, 184, 0.1)" },
+        vertLines: { color: "rgba(255, 255, 255, 0.03)" },
+        horzLines: { color: "rgba(255, 255, 255, 0.03)" },
       },
       rightPriceScale: {
-        borderColor: "rgba(148, 163, 184, 0.2)",
+        borderColor: "rgba(255, 255, 255, 0.1)",
+        visible: true,
       },
       timeScale: {
-        borderColor: "rgba(148, 163, 184, 0.2)",
+        borderColor: "rgba(255, 255, 255, 0.1)",
         timeVisible: true,
         secondsVisible: true,
       },
       crosshair: {
-        vertLine: { color: "rgba(59, 130, 246, 0.4)" },
-        horzLine: { color: "rgba(59, 130, 246, 0.4)" },
+        mode: CrosshairMode.Normal,
+        vertLine: {
+          color: "#0EA5E9",
+          width: 1,
+          style: 2,
+        },
+        horzLine: {
+          color: "#0EA5E9",
+          width: 1,
+          style: 2,
+        },
+      },
+      handleScale: {
+        axisPressedMouseMove: true,
       },
       width: containerRef.current.clientWidth,
-      height: 320,
+      height: 400,
     });
 
-    const lineSeries = chart.addSeries(LineSeries, {
-      color: "#38bdf8",
-      lineWidth: 2,
+    const areaSeries = chart.addSeries(AreaSeries, {
+      lineColor: "#0EA5E9",
+      topColor: "rgba(14, 165, 233, 0.3)",
+      bottomColor: "rgba(14, 165, 233, 0.02)",
+      lineWidth: 3,
     });
 
     chartRef.current = chart;
-    seriesRef.current = lineSeries;
+    seriesRef.current = areaSeries;
 
     const resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
         if (!chartRef.current) return;
         chartRef.current.applyOptions({
           width: entry.contentRect.width,
-          height: entry.contentRect.height,
         });
       }
     });
@@ -83,20 +99,26 @@ export default function RealtimeChart({ latestPoint, symbol }: RealtimeChartProp
       time: latestPoint.time as UTCTimestamp,
       value: latestPoint.value,
     });
-    chartRef.current?.timeScale().fitContent();
   }, [latestPoint]);
 
   return (
-    <section className="flex h-full flex-col gap-4">
-      <div>
-        <p className="text-xs uppercase tracking-[0.3em] text-sky-200/70">
-          Real-time Chart
-        </p>
-        <h2 className="text-2xl font-semibold text-white">{symbol} in BTC</h2>
+    <div className="flex h-full flex-col gap-6">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="rounded-lg bg-secondary/10 px-2 py-1 text-xs font-bold text-secondary border border-secondary/20">
+            {symbol} / BTC
+          </div>
+          <h2 className="font-display text-2xl font-semibold text-white">Market Activity</h2>
+        </div>
+        <div className="flex gap-2">
+          {['1m', '5m', '15m', '1h', 'D'].map(t => (
+            <button key={t} className="px-2 py-1 text-[10px] font-bold text-white/40 hover:text-white transition-colors">{t}</button>
+          ))}
+        </div>
       </div>
-      <div className="relative flex-1 overflow-hidden rounded-2xl border border-white/10 bg-white/5 p-4 shadow-[0_0_60px_-30px_rgba(56,189,248,0.7)]">
-        <div ref={containerRef} className="h-full w-full" />
+      <div className="relative flex-1 min-h-[400px]">
+        <div ref={containerRef} className="absolute inset-0" />
       </div>
-    </section>
+    </div>
   );
 }

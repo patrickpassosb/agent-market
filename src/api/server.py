@@ -228,14 +228,22 @@ manager = ConnectionManager()
 
 async def broadcast_loop():
     """Reads state from the simulation runner and pushes to WebSocket clients."""
+    last_news_tick = -1
     while True:
         if sim.running and sim.engine:
-            # Construct payload aligned with frontend expectations.
-            payload = {
+            # 1. Ticker Update
+            await manager.broadcast({
                 "type": "ticker",
                 "data": dict(sim.engine.current_prices),
-            }
-            await manager.broadcast(payload)
+            })
+            
+            # 2. News Update (if new)
+            if sim.latest_news and sim.latest_news.get("tick", 0) > last_news_tick:
+                last_news_tick = sim.latest_news["tick"]
+                await manager.broadcast({
+                    "type": "news",
+                    "data": sim.latest_news
+                })
         
         await asyncio.sleep(0.5) # Update frontend every 500ms
 
@@ -272,6 +280,7 @@ def get_agents():
         {
             "id": a.id,
             "persona": a.persona,
+            "model": a.model_name,
             "portfolio": a.portfolio.get_metrics(sim.engine.current_prices)
         }
         for a in sim.agents
