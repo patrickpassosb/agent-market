@@ -1,17 +1,25 @@
 # 🛠 Technical Documentation
 
-## Hybrid LLM Strategy
+## 🔌 API Providers & LLM Strategy
 
-To maximize performance within rate limits and budget, we employ a tiered model strategy:
+The simulation leverages multiple inference providers to maximize throughput and bypass individual rate limits. We use **LiteLLM** for universal routing and fallbacks.
+
+### Primary Providers
+- **Google Gemini**: Used for high-intelligence analytical tasks (e.g., Journalist Agent) and long-context processing.
+- **Groq**: Provides low-latency, high-speed inference for reactive "Fast" trader personas.
+- **Cerebras**: Integrated for ultra-high-throughput inference with Llama 3.1 models.
+- **SambaNova**: Utilized for record-breaking inference speeds and specialized high-performance workloads.
+- **OpenRouter**: Acts as a generalized fallback and aggregator for various open-source models (Mistral, etc.).
+
+### Hybrid Model Strategy
 
 | Agent Archetype | Model | Reasoning |
 | :--- | :--- | :--- |
-| **Whales / Market Makers** | OpenRouter/Groq/Gemini (strategic tier) | High reasoning tier; routed across providers to reduce free-tier limits. |
-| **Value Investors** | OpenRouter/Groq/Gemini (analytical tier) | Long-context/analysis tier; routed across providers. |
-| **Algorithmic Traders** | OpenRouter/Groq/Gemini (rule tier) | Rule-following tier; routed across providers. |
-| **Retail / FOMO** | OpenRouter/Groq/Gemini (fast tier) | Fast, low-cost tier for reactive agents. |
+| **Whales / Market Makers** | Strategic Tier (Llama 70B / Gemini Pro) | High reasoning for complex position sizing. |
+| **Analytical / News** | Gemini 1.5 Flash | Best-in-class at synthesizing large market datasets. |
+| **Reactive / Retail** | Fast Tier (Llama 8B / Cerebras) | Speed is priority for high-frequency sentiment shifts. |
 
-*Implemented in `src/utils/personas.py:get_model_for_persona()` with provider rotation controlled by `MODEL_PROVIDER_ORDER`.*
+*Provider rotation is controlled by `MODEL_PROVIDER_ORDER` in `.env`. Default fallback logic is implemented in `src/utils/personas.py`.*
 
 ## System Architecture
 

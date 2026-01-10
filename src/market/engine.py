@@ -14,7 +14,6 @@ Responsibilities:
 
 from typing import List, Any, Dict, Optional
 import math
-import math
 from datetime import datetime
 
 from .ledger import Ledger
@@ -155,8 +154,14 @@ class MarketEngine:
                 )
                 
                 if not success:
-                    # Rollback: Insufficient funds, cancel the trade
-                    # In a real system we'd need to put the order back on the book
+                    # CONCEPTUAL FIX: Re-insert the popped order back into the book
+                    # transaction.seller_id (maker) had their order popped
+                    self.order_book.reinsert_order(
+                        agent_id=transaction.seller_id,
+                        item=transaction.item,
+                        price=transaction.price,
+                        is_buy=False  # Re-insert as ask
+                    )
                     return None
                     
         elif action == AgentAction.SELL:
@@ -172,7 +177,14 @@ class MarketEngine:
                 )
                 
                 if not success:
-                    # Rollback: Insufficient inventory
+                    # CONCEPTUAL FIX: Re-insert the popped order back into the book
+                    # transaction.buyer_id (maker) had their order popped
+                    self.order_book.reinsert_order(
+                        agent_id=transaction.buyer_id,
+                        item=transaction.item,
+                        price=transaction.price,
+                        is_buy=True  # Re-insert as bid
+                    )
                     return None
         else:
             return None

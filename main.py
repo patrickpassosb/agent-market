@@ -287,11 +287,9 @@ async def main():
                         if tx:
                             logging.info(f"  -> TRADE EXECUTED: {tx}")
 
-                # Execute in batches to avoid overwhelming API limits
-                batch_size = 4
-                for i in range(0, len(agents), batch_size):
-                    batch = agents[i:i+batch_size]
-                    await asyncio.gather(*[run_agent(a) for a in batch], return_exceptions=True)
+                # Execute all agents concurrently
+                # The GlobalRateLimiter will handle queuing if we exceed API limits
+                await asyncio.gather(*[run_agent(a) for a in agents], return_exceptions=True)
 
                 # --- PHASE 4: VISUALIZE ---
                 layout["market_status"].update(create_market_table(engine))

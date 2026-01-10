@@ -218,3 +218,14 @@ class OrderBook:
         best_bid = -bids[0][0] if bids else None
         best_ask = asks[0][0] if asks else None
         return best_bid, best_ask
+
+    def reinsert_order(self, agent_id: str, item: str, price: float, is_buy: bool):
+        """
+        Puts an order back onto the book (e.g., if a match occurred but taker failed).
+        Note: This doesn't preserve exact original timestamp but prevents order loss.
+        """
+        timestamp = datetime.now(timezone.utc).timestamp()
+        if is_buy:
+            heapq.heappush(self._get_bids(item), (-float(price), timestamp, agent_id))
+        else:
+            heapq.heappush(self._get_asks(item), (float(price), timestamp, agent_id))

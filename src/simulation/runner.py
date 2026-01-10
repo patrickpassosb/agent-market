@@ -95,14 +95,12 @@ class SimulationRunner:
             # 2. Agent Actions
             random.shuffle(self.agents)
             
-            # Concurrent execution of agent actions (as implemented by other agent)
-            active_agents = self.agents[:4] 
-            
+            # Define the interaction logic for a single agent
             async def run_agent(agent: Trader):
                 focused_asset = random.choice(SUPPORTED_ASSETS)
                 state = self.engine.get_state(focused_asset)
                 
-                # DECIDE
+                # DECIDE (LLM Call)
                 decision = await agent.act(state, focused_asset, self.engine.current_prices)
                 
                 if decision:
@@ -137,8 +135,9 @@ class SimulationRunner:
                     }
                 return None
 
-            # Execute concurrently
-            results = await asyncio.gather(*[run_agent(a) for a in active_agents], return_exceptions=True)
+            # Execute all agents concurrently
+            # The GlobalRateLimiter will handle queuing if we exceed API limits
+            results = await asyncio.gather(*[run_agent(a) for a in self.agents], return_exceptions=True)
             
             tick_logs = []
             for res in results:
