@@ -8,23 +8,26 @@ It handles:
 3. Structured Output parsing (using `litellm` and `pydantic`).
 """
 
-from typing import Optional, Literal, Dict
 import math
-import random
-from pydantic import BaseModel, Field
+from typing import Literal
+
 import litellm
-from litellm import completion, acompletion
-from .base import BaseAgent
-from src.market.schema import MarketState, AgentAction, SUPPORTED_ASSETS, QUOTE_CURRENCY
-from src.utils.personas import get_models_for_tier, get_persona_tier, PersonaStrategy, PERSONA_MAP
+from litellm import acompletion
+from pydantic import BaseModel, Field
+
+from src.market.schema import QUOTE_CURRENCY, SUPPORTED_ASSETS, AgentAction, MarketState
 from src.prompts.trader import get_trader_system_prompt
 from src.utils.concurrency import GlobalRateLimiter
+from src.utils.personas import PERSONA_MAP, PersonaStrategy, get_models_for_tier, get_persona_tier
+
+from .base import BaseAgent
 
 # --- Data Models for LLM Output ---
 
 litellm.enable_json_schema_validation = True
 
 import re
+
 
 def _sanitize_string(text: str) -> str:
     """Strip HTML tags and excessive whitespace."""
@@ -127,7 +130,7 @@ class Trader(BaseAgent):
         # Default: no special constraints
         return "Follow your general strategy as described in your persona."
 
-    async def act(self, market_state: MarketState, focused_item: str, all_current_prices: Dict[str, float]) -> Optional[dict]:
+    async def act(self, market_state: MarketState, focused_item: str, all_current_prices: dict[str, float]) -> dict | None:
         """
         Execute one decision cycle.
         

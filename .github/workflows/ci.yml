@@ -1,4 +1,4 @@
-name: CI Pipeline
+name: Enterprise CI/CD Pipeline
 
 on:
   push:
@@ -6,63 +6,108 @@ on:
   pull_request:
     branches: [ main, master ]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  test:
+  lint-and-audit:
+    name: 🛡️ Lint & Security Audit
     runs-on: ubuntu-latest
-    
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: Set up Python
+        run: uv python install 3.12
+      - name: Install dependencies
+        run: uv sync --dev
+      
+      - name: 🏃 Ruff Check & Format
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+      
+      - name: 🔍 Security Audit (Bandit)
+        run: uv run bandit -r src/ -ll
+        
+      - name: 📦 Dependency Audit
+        run: uv tool run pip-audit
+
+  test:
+    name: 🧪 Automated Testing
+    needs: lint-and-audit
+    runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]
-    
+        python-version: ["3.12"]
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    
-    - name: Install uv
-      uses: astral-sh/setup-uv@v5
-      with:
-        enable-cache: true
-    
-    - name: Set up Python ${{ matrix.python-version }}
-      run: uv python install ${{ matrix.python-version }}
-    
-    - name: Install dependencies
-      run: uv sync --all-extras --dev
-    
-    - name: Run tests with coverage
-      run: uv run pytest tests/ -v --cov=src --cov-report=xml --cov-report=term
-    
-    - name: Upload coverage to Codecov (optional)
-      uses: codecov/codecov-action@v4
-      continue-on-error: true
-      with:
-        file: ./coverage.xml
-        fail_ci_if_error: false
-        token: ${{ secrets.CODECOV_TOKEN }}
-    
-    - name: Check code formatting (optional)
-      run: |
-        uv run black --check src/ tests/ || true
-        uv run isort --check-only src/ tests/ || true
-      continue-on-error: true
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: uv sync --all-extras --dev
+      - name: Run tests with coverage
+        run: uv run pytest tests/ -v --cov=src --cov-report=term-missing
 
-  lint:
+  docker-verify:
+    name: 🐳 Docker Build Verify
     runs-on: ubuntu-latest
-    
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Install uv
-      uses: astral-sh/setup-uv@v5
-    
-    - name: Set up Python
-      run: uv python install 3.12
-    
-    - name: Install dependencies
-      run: uv sync --dev
-    
-    - name: Run flake8 (optional linting)
-      run: |
-        uv pip install flake8
-        uv run flake8 src/ --count --select=E9,F63,F7,F82 --show-source --statistics || true
-      continue-on-error: true
+      - uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build (Dry Run)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          tags: agent-market:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy-production:
+    name: 🚀 Continuous Deployment
+    needs: [test, docker-verify]
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=latest,enable=true
+            type=sha,format=short
+
+      - name: Build and Push to GHCR
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: 🚛 Trigger Production Update (SSH)
+        # This uses a placeholder step. In a real environment, you'd use appleboy/ssh-action.
+        run: |
+          echo "Triggering deployment on EC2 instance..."
+          echo "Command: docker compose pull && docker compose up -d"
+          # placeholder for: uses: appleboy/ssh-action@master

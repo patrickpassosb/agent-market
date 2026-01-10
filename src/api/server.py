@@ -6,17 +6,15 @@ This module exposes the internal MarketEngine state via:
 2. WebSockets: For real-time streaming of prices and agent actions.
 """
 
-import os
 import asyncio
-from typing import List, Optional
+import os
 from contextlib import asynccontextmanager, suppress
 
 from dotenv import load_dotenv
-
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, status, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.security import APIKeyHeader
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -31,8 +29,8 @@ api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
 
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",")
 
+from src.market.schema import QUOTE_CURRENCY, SUPPORTED_ASSETS
 from src.simulation.runner import SimulationRunner
-from src.market.schema import SUPPORTED_ASSETS, QUOTE_CURRENCY
 
 # --- Global State ---
 
@@ -40,7 +38,7 @@ sim = SimulationRunner()
 
 # --- Security Dependency ---
 
-async def get_api_key(api_key: Optional[str] = Depends(api_key_header)):
+async def get_api_key(api_key: str | None = Depends(api_key_header)):
     if API_KEY and api_key != API_KEY:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -103,7 +101,7 @@ app.add_middleware(
 
 class ConnectionManager:
     def __init__(self):
-        self.active_connections: List[WebSocket] = []
+        self.active_connections: list[WebSocket] = []
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
@@ -176,7 +174,7 @@ def get_agents():
     ]
 
 @app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = None):
+async def websocket_endpoint(websocket: WebSocket, api_key: str | None = None):
     # For WebSockets, we can check the API key via query param or subprotocol
     # Here we check an optional query param 'token'
     token = websocket.query_params.get("token")

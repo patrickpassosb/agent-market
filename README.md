@@ -155,8 +155,35 @@ uv run pytest tests/ -v
 
 ## Reproducibility
 
+### Local Docker
 Docker is available for consistent runs:
 ```bash
 docker build -t agent-market .
 docker run --env-file .env agent-market
 ```
+
+### Production Deployment (AWS EC2)
+
+For a persistent, 24/7 simulation with a web dashboard:
+
+1.  **Launch EC2 Instance:** Use Ubuntu 22.04 LTS (t2.micro is supported).
+2.  **Open Ports:** Ensure Port 80 (HTTP) is open in your Security Group.
+3.  **Setup Instance:**
+    ```bash
+    git clone https://github.com/your-username/agent-market.git
+    cd agent-market
+    ./scripts/setup_ec2.sh
+    # Log out and back in to apply docker group permissions
+    ```
+4.  **Configure Environment:**
+    ```bash
+    cp .env.example .env
+    nano .env  # Add your API keys and configuration
+    ```
+5.  **Deploy:**
+    ```bash
+    ./scripts/deploy.sh
+    ```
+6.  **Access:** Open your EC2 Public IP in a browser to view the dashboard.
+
+The production setup uses Nginx as a reverse proxy, FastAPI for the backend, and Next.js for the frontend, all orchestrated via `docker-compose.prod.yml`.

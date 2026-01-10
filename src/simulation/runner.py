@@ -6,16 +6,16 @@ Agents, and Journalist. It runs as an asynchronous background task.
 """
 
 import asyncio
-import time
 import random
-from typing import List, Dict, Optional
+import time
 from contextlib import suppress
 
-from src.market.engine import MarketEngine
-from src.agents.trader import Trader
 from src.agents.journalist import JournalistAgent
-from src.market.schema import SUPPORTED_ASSETS, QUOTE_CURRENCY, InteractionLog
+from src.agents.trader import Trader
+from src.market.engine import MarketEngine
+from src.market.schema import SUPPORTED_ASSETS, InteractionLog
 from src.utils.personas import PERSONA_MAP, PersonaStrategy, get_model_for_persona
+
 
 class SimulationRunner:
     """
@@ -23,12 +23,12 @@ class SimulationRunner:
     """
     def __init__(self):
         self.running = False
-        self.engine: Optional[MarketEngine] = None
-        self.agents: List[Trader] = []
-        self.journalist: Optional[JournalistAgent] = None
-        self.task: Optional[asyncio.Task] = None
-        self.latest_logs: List[dict] = []
-        self.latest_news: Optional[dict] = None
+        self.engine: MarketEngine | None = None
+        self.agents: list[Trader] = []
+        self.journalist: JournalistAgent | None = None
+        self.task: asyncio.Task | None = None
+        self.latest_logs: list[dict] = []
+        self.latest_news: dict | None = None
         self.tick_count = 0
 
     async def start(self):

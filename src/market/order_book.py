@@ -14,9 +14,10 @@ To simulate a Max-Heap for bids, we negate the price before pushing to the heap.
 """
 
 import heapq
-from typing import Dict, List, Tuple, Optional
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+
 from .schema import Transaction
+
 
 class OrderBook:
     """
@@ -33,11 +34,11 @@ class OrderBook:
     def __init__(self):
         """Initialize empty bid/ask heaps per item."""
         # Buy orders: Max-heap per item (store negative price to simulate max-heap with python's min-heap)
-        self.bids: Dict[str, List[Tuple[float, float, str]]] = {}
+        self.bids: dict[str, list[tuple[float, float, str]]] = {}
         # Sell orders: Min-heap per item
-        self.asks: Dict[str, List[Tuple[float, float, str]]] = {}
+        self.asks: dict[str, list[tuple[float, float, str]]] = {}
 
-    def _get_bids(self, item: str) -> List[Tuple[float, float, str]]:
+    def _get_bids(self, item: str) -> list[tuple[float, float, str]]:
         """
         Retrieve the bid heap for a specific item. 
         Creates a new list if one doesn't exist.
@@ -50,7 +51,7 @@ class OrderBook:
         """
         return self.bids.setdefault(item, [])
 
-    def _get_asks(self, item: str) -> List[Tuple[float, float, str]]:
+    def _get_asks(self, item: str) -> list[tuple[float, float, str]]:
         """
         Retrieve the ask heap for a specific item. 
         Creates a new list if one doesn't exist.
@@ -63,7 +64,7 @@ class OrderBook:
         """
         return self.asks.setdefault(item, [])
 
-    def add_buy(self, agent_id: str, item: str, price: float) -> Optional[Transaction]:
+    def add_buy(self, agent_id: str, item: str, price: float) -> Transaction | None:
         """
         Processes a BUY order (Bid).
         
@@ -80,7 +81,7 @@ class OrderBook:
         Returns:
             Optional[Transaction]: A Transaction object if a trade executed, otherwise None.
         """
-        timestamp = datetime.now(timezone.utc).timestamp()  # https://github.com/python/cpython/blob/main/Doc/library/datetime.rst (Context7 /python/cpython)
+        timestamp = datetime.now(UTC).timestamp()  # https://github.com/python/cpython/blob/main/Doc/library/datetime.rst (Context7 /python/cpython)
         
         # Check if we can match with existing sell orders (asks) for this item
         # Lowest ask is at asks[0] (Min-Heap Root)
@@ -101,7 +102,7 @@ class OrderBook:
                     seller_id=seller_id,
                     item=item,
                     price=execution_price,
-                    timestamp=datetime.now(timezone.utc)
+                    timestamp=datetime.now(UTC)
                 )
         
         # No match found, add to order book as a resting order
@@ -110,7 +111,7 @@ class OrderBook:
         heapq.heappush(bids, (-price, timestamp, agent_id))
         return None
 
-    def add_sell(self, agent_id: str, item: str, price: float) -> Optional[Transaction]:
+    def add_sell(self, agent_id: str, item: str, price: float) -> Transaction | None:
         """
         Processes a SELL order (Ask).
         
@@ -127,7 +128,7 @@ class OrderBook:
         Returns:
             Optional[Transaction]: A Transaction object if a trade executed, otherwise None.
         """
-        timestamp = datetime.now(timezone.utc).timestamp()  # https://github.com/python/cpython/blob/main/Doc/library/datetime.rst (Context7 /python/cpython)
+        timestamp = datetime.now(UTC).timestamp()  # https://github.com/python/cpython/blob/main/Doc/library/datetime.rst (Context7 /python/cpython)
         
         # Check if we can match with existing buy orders (bids) for this item
         # Highest bid is at bids[0] (stored as negative value)
@@ -149,7 +150,7 @@ class OrderBook:
                     seller_id=agent_id,
                     item=item,
                     price=execution_price,
-                    timestamp=datetime.now(timezone.utc)
+                    timestamp=datetime.now(UTC)
                 )
         
         # No match found, add to order book as a resting order
@@ -157,7 +158,7 @@ class OrderBook:
         heapq.heappush(asks, (price, timestamp, agent_id))
         return None
 
-    def get_summary(self, item: Optional[str] = None) -> dict:
+    def get_summary(self, item: str | None = None) -> dict:
         """
         Returns a simplified summary of the current order book state.
         
@@ -209,7 +210,7 @@ class OrderBook:
             "asks_count": sum(len(heap) for heap in self.asks.values())
         }
 
-    def get_best_quotes(self, item: str) -> tuple[Optional[float], Optional[float]]:
+    def get_best_quotes(self, item: str) -> tuple[float | None, float | None]:
         """
         Returns the best bid and ask for a specific item.
         """
@@ -224,7 +225,7 @@ class OrderBook:
         Puts an order back onto the book (e.g., if a match occurred but taker failed).
         Note: This doesn't preserve exact original timestamp but prevents order loss.
         """
-        timestamp = datetime.now(timezone.utc).timestamp()
+        timestamp = datetime.now(UTC).timestamp()
         if is_buy:
             heapq.heappush(self._get_bids(item), (-float(price), timestamp, agent_id))
         else:

@@ -6,10 +6,11 @@ It enforces a standard interface (`act`) that the simulation loop relies on.
 """
 
 from abc import ABC, abstractmethod
-from typing import Optional
-from src.market.schema import MarketState, AgentAction, Transaction
-from src.memory.memory import AgentMemory
+
 from src.agents.portfolio import Portfolio
+from src.market.schema import MarketState
+from src.memory.memory import AgentMemory
+
 
 class BaseAgent(ABC):
     """
@@ -37,7 +38,7 @@ class BaseAgent(ABC):
         self.portfolio = Portfolio()
 
     @abstractmethod
-    async def act(self, market_state: MarketState) -> Optional[dict]:
+    async def act(self, market_state: MarketState) -> dict | None:
         """
         The core decision-making method.
         

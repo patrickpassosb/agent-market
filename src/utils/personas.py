@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 from enum import Enum
 
+
 class PersonaStrategy(Enum):
     CONSERVATIVE = "conservative"
     MOMENTUM = "momentum"

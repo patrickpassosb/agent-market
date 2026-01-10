@@ -26,9 +26,10 @@ Market data is logged to console and visible in the dashboard, but there is no a
 The challenge requires "experiment evidence (videos, plots, logs)". While logs exist, plots and structured reports are missing.
 
 ### Success Criteria
-- [ ] `src/analysis/report.py` updated to generate a PDF or Markdown summary of the run.
-- [ ] `src/analysis/chart.py` implemented to create PNG price history plots for all assets.
-- [ ] Automated "End of Simulation" summary printed to terminal using `Rich`.
+- [x] `src/analysis/report.py` generates a Markdown summary per run in `reports/<run_id>/report.md`.
+- [x] `src/analysis/chart.py` creates PNG price history plots for each asset and an agent ROI chart.
+- [x] `main.py` prints an end-of-simulation summary to the terminal using `Rich`.
+- [x] `main.py` supports a `--report` flag to trigger report generation on exit.
 
 ---
 

@@ -2,11 +2,14 @@
 Tests for SimulationRunner orchestration.
 """
 
-import pytest
 import asyncio
-from unittest.mock import MagicMock, AsyncMock, patch
-from src.simulation.runner import SimulationRunner
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
 from src.market.schema import AgentAction, Transaction
+from src.simulation.runner import SimulationRunner
+
 
 class TestSimulationRunner:
     @pytest.fixture

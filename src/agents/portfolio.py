@@ -4,9 +4,9 @@ Portfolio Management for Trading Agents.
 Tracks cash, positions, and calculates profit/loss metrics.
 """
 
-from typing import Dict
 import math
-from pydantic import BaseModel, Field, ConfigDict, PrivateAttr
+
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 
 class Portfolio(BaseModel):
@@ -23,12 +23,12 @@ class Portfolio(BaseModel):
 
     cash: float = Field(default=1.5, description="Available cash balance (BTC)")
     initial_capital: float = Field(default=1.5, description="The starting value of the portfolio for ROI tracking.")
-    positions: Dict[str, int] = Field(default_factory=dict, description="Holdings: {item: quantity}")
+    positions: dict[str, int] = Field(default_factory=dict, description="Holdings: {item: quantity}")
     realized_pnl: float = Field(default=0.0, description="Locked-in profit/loss from closed positions")
     trades_count: int = Field(default=0, description="Total number of trades executed")
     
     # Cost basis tracking for P/L calculation
-    _cost_basis: Dict[str, float] = PrivateAttr(default_factory=dict)  # PrivateAttr per https://github.com/pydantic/pydantic/blob/main/docs/concepts/models.md (Context7 /pydantic/pydantic)
+    _cost_basis: dict[str, float] = PrivateAttr(default_factory=dict)  # PrivateAttr per https://github.com/pydantic/pydantic/blob/main/docs/concepts/models.md (Context7 /pydantic/pydantic)
     
     def execute_buy(self, item: str, quantity: int, price: float) -> bool:
         """
@@ -91,7 +91,7 @@ class Portfolio(BaseModel):
         
         return True
     
-    def get_unrealized_pnl(self, current_prices: Dict[str, float]) -> float:
+    def get_unrealized_pnl(self, current_prices: dict[str, float]) -> float:
         """
         Calculate unrealized P/L based on current market prices.
         
@@ -106,11 +106,11 @@ class Portfolio(BaseModel):
         
         return unrealized
     
-    def get_total_pnl(self, current_prices: Dict[str, float]) -> float:
+    def get_total_pnl(self, current_prices: dict[str, float]) -> float:
         """Total P/L = realized + unrealized"""
         return self.realized_pnl + self.get_unrealized_pnl(current_prices)
     
-    def get_portfolio_value(self, current_prices: Dict[str, float]) -> float:
+    def get_portfolio_value(self, current_prices: dict[str, float]) -> float:
         """Total wealth = cash + market value of positions"""
         position_value = sum(
             qty * current_prices.get(item, 0)
@@ -118,7 +118,7 @@ class Portfolio(BaseModel):
         )
         return self.cash + position_value
     
-    def get_metrics(self, current_prices: Dict[str, float]) -> dict:
+    def get_metrics(self, current_prices: dict[str, float]) -> dict:
         """
         Return performance metrics for analytics.
         """

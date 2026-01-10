@@ -12,22 +12,23 @@ Usage:
 Stop the simulation with Ctrl+C (SIGINT). The script will handle graceful shutdown.
 """
 
-import os
 import argparse
 import asyncio
-import random
 import logging
+import math
+import os
+import random
 from collections import deque
+from collections.abc import Iterable
 from datetime import datetime
-from typing import List, Iterable
-from dotenv import load_dotenv
 
-from rich.live import Live
-from rich.table import Table
-from rich.layout import Layout
-from rich.console import Console
-from rich.panel import Panel
 import litellm
+from dotenv import load_dotenv
+from rich.console import Console
+from rich.layout import Layout
+from rich.live import Live
+from rich.panel import Panel
+from rich.table import Table
 
 # Suppress LiteLLM verbose logging completely
 litellm.set_verbose = False
@@ -35,12 +36,18 @@ os.environ["LITELLM_LOG"] = "CRITICAL"  # Only critical errors
 logging.getLogger("LiteLLM").setLevel(logging.CRITICAL)
 logging.getLogger("litellm").setLevel(logging.CRITICAL)
 
-from src.market.engine import MarketEngine
 from src.agents.trader import Trader
-from src.market.schema import AgentAction, ActionLog, InteractionLog, SUPPORTED_ASSETS, QUOTE_CURRENCY
-from src.utils.personas import PERSONAS, get_model_for_persona, PersonaStrategy
-from src.utils.checkpoints import build_checkpoint, write_checkpoint
 from src.analysis.report import generate_report
+from src.market.engine import MarketEngine
+from src.market.schema import (
+    QUOTE_CURRENCY,
+    SUPPORTED_ASSETS,
+    ActionLog,
+    AgentAction,
+    InteractionLog,
+)
+from src.utils.checkpoints import build_checkpoint, write_checkpoint
+from src.utils.personas import PersonaStrategy, get_model_for_persona
 
 # --- Configuration ---
 
@@ -104,7 +111,7 @@ def create_market_table(engine: MarketEngine) -> Panel:
     
     return Panel(table, title="Live Ticker")
 
-def create_activity_table(agents: List[Trader], recent_actions: Iterable[ActionLog]) -> Panel:
+def create_activity_table(agents: list[Trader], recent_actions: Iterable[ActionLog]) -> Panel:
     """
     Renders the Agent Activity feed. 
     """
@@ -139,6 +146,95 @@ def create_activity_table(agents: List[Trader], recent_actions: Iterable[ActionL
     
     return Panel(table, title="Live Feed")
 
+def _format_optional_float(value: float | None, decimals: int = 6) -> str:
+    if value is None or not math.isfinite(value):
+        return "n/a"
+    return f"{value:.{decimals}f}"
+
+
+def _build_run_summary(
+    run_id: str,
+    ticks: int,
+    agents: list[Trader],
+    transactions: list,
+    current_prices: dict[str, float],
+    report_dir: str | None,
+    report_enabled: bool,
+) -> dict[str, object]:
+    prices = [tx.price for tx in transactions]
+    avg_price = sum(prices) / len(prices) if prices else None
+    min_price = min(prices) if prices else None
+    max_price = max(prices) if prices else None
+
+    agent_metrics = []
+    for agent in agents:
+        metrics = agent.portfolio.get_metrics(current_prices)
+        agent_metrics.append((agent.id, metrics.get("roi")))
+    agent_metrics.sort(
+        key=lambda item: item[1] if item[1] is not None else float("-inf"),
+        reverse=True,
+    )
+
+    top_agent = agent_metrics[0][0] if agent_metrics else None
+    top_roi = agent_metrics[0][1] if agent_metrics else None
+    report_path = os.path.join(report_dir, "report.md") if report_dir else None
+
+    return {
+        "run_id": run_id,
+        "ticks": ticks,
+        "total_trades": len(transactions),
+        "avg_price": avg_price,
+        "min_price": min_price,
+        "max_price": max_price,
+        "top_agent": top_agent,
+        "top_roi": top_roi,
+        "report_path": report_path,
+        "report_enabled": report_enabled,
+    }
+
+
+def _render_run_summary(summary: dict[str, object]) -> None:
+    table = Table(title="End of Simulation Summary")  # https://github.com/textualize/rich/blob/master/docs/source/tables.rst (Context7 /textualize/rich)
+    table.add_column("Metric", style="bold")
+    table.add_column("Value")
+    table.add_row("Run ID", str(summary["run_id"]))
+    table.add_row("Ticks", str(summary["ticks"]))
+    table.add_row("Total trades", str(summary["total_trades"]))
+    avg_price = summary.get("avg_price")
+    min_price = summary.get("min_price")
+    max_price = summary.get("max_price")
+    table.add_row(
+        "Avg price (BTC)",
+        _format_optional_float(avg_price if isinstance(avg_price, (int, float)) else None),
+    )
+    table.add_row(
+        "Min price (BTC)",
+        _format_optional_float(min_price if isinstance(min_price, (int, float)) else None),
+    )
+    table.add_row(
+        "Max price (BTC)",
+        _format_optional_float(max_price if isinstance(max_price, (int, float)) else None),
+    )
+
+    top_agent = summary.get("top_agent")
+    top_roi = summary.get("top_roi")
+    if top_agent and top_roi is not None and isinstance(top_roi, (int, float)) and math.isfinite(top_roi):
+        top_agent_label = f"{top_agent} (ROI {_format_optional_float(top_roi, 1)}%)"
+    elif top_agent:
+        top_agent_label = str(top_agent)
+    else:
+        top_agent_label = "n/a"
+    table.add_row("Top agent", top_agent_label)
+
+    report_path = summary.get("report_path")
+    if report_path:
+        report_label = str(report_path)
+    else:
+        report_label = "disabled" if summary.get("report_enabled") is False else "n/a"
+    table.add_row("Report", report_label)
+
+    console.print(table)
+
 def parse_args():
     """
     Parse CLI args for bounded runs and checkpointing.
@@ -155,6 +251,7 @@ def parse_args():
     parser.add_argument("--initial-price", type=float, default=0.005, help="Seed price for the first tick (BTC).")
     parser.add_argument("--seed-inventory", type=int, default=10, help="Initial units assigned to each agent per asset.")
     parser.add_argument("--report-dir", type=str, default="reports", help="Directory for post-run reports.")
+    parser.add_argument("--report", action="store_true", help="Generate post-run report on exit.")
     parser.add_argument("--no-report", action="store_true", help="Disable post-run report generation.")
     return parser.parse_args()
 
@@ -184,7 +281,7 @@ async def main():
 
     # Initialize Market Engine
     engine = MarketEngine("market.db", run_id=run_id, initial_price=args.initial_price)
-    agents: List[Trader] = []
+    agents: list[Trader] = []
     
     # Initialize Agents with random personas
     available_strategies = list(PersonaStrategy)
@@ -214,117 +311,132 @@ async def main():
     journalist = JournalistAgent()
 
     # 2. Execution Loop
-    with Live(layout, refresh_per_second=4, screen=True):
-        tick = 0
-        try:
-            while True:
-                tick += 1
-                start_time = asyncio.get_event_loop().time()
-            
-                # --- JOURNALIST UPDATE ---
-                if tick % 10 == 0:
-                    recent_txns = engine.ledger.get_transactions(limit=20)
-                    try:
-                        news = await journalist.analyze(engine.get_state(SUPPORTED_ASSETS[0]), recent_txns)
-                        layout["news_flash"].update(Panel(f"[bold]{news.headline}[/bold]\n{news.body}", title="BREAKING NEWS", style="bold red"))
-                    except Exception as e:
-                        logging.error(f"Journalist error: {e}")
-            
-                # Shuffle agents so they act in random order
-                random.shuffle(agents)
-            
-                # --- PHASE 2: THINK & ACT (Concurrent Batches) ---
-                async def run_agent(agent: Trader):
-                    # Randomly pick an asset to focus on for this turn
-                    focused_asset = random.choice(SUPPORTED_ASSETS)
-                    
-                    # Agent perceives state of that asset, retrieves memory, and decides
-                    state = engine.get_state(focused_asset)
-                    decision = await agent.act(state, focused_item=focused_asset, all_current_prices=engine.current_prices)
-                    
-                    if decision:
-                        # Negotiate a counter-offer
-                        negotiated_price, negotiation_details = engine.negotiate_price(
-                            agent_id=agent.id,
-                            action=decision["action"],
-                            item=decision["item"],
-                            price=decision["price"],
-                        )
-                        if negotiation_details:
-                            decision["price"] = negotiated_price
-                            engine.ledger.record_interaction(InteractionLog(**negotiation_details))
+    report_dir = None
+    report_enabled = args.report or not args.no_report
+    tick = 0
+    try:
+        with Live(layout, refresh_per_second=4, screen=True):
+            try:
+                while True:
+                    tick += 1
+                    start_time = asyncio.get_event_loop().time()
 
-                        # Execute action against the market engine
-                        tx = engine.process_action(
-                            agent, 
-                            decision["action"], 
-                            decision["item"], 
-                            decision["price"]
-                        )
+                    # --- JOURNALIST UPDATE ---
+                    if tick % 10 == 0:
+                        recent_txns = engine.ledger.get_transactions(limit=20)
+                        try:
+                            news = await journalist.analyze(engine.get_state(SUPPORTED_ASSETS[0]), recent_txns)
+                            layout["news_flash"].update(Panel(f"[bold]{news.headline}[/bold]\n{news.body}", title="BREAKING NEWS", style="bold red"))
+                        except Exception as e:
+                            logging.error(f"Journalist error: {e}")
+
+                    # Shuffle agents so they act in random order
+                    random.shuffle(agents)
+
+                    # --- PHASE 2: THINK & ACT (Concurrent Batches) ---
+                    async def run_agent(agent: Trader):
+                        # Randomly pick an asset to focus on for this turn
+                        focused_asset = random.choice(SUPPORTED_ASSETS)
                         
-                        # Prepare log entry
-                        log_entry = ActionLog(
-                            agent_id=agent.id,
-                            action=decision["action"],
-                            price=decision["price"],
-                            reasoning=decision["reasoning"]
-                        )
-                        recent_actions.append(log_entry)
+                        # Agent perceives state of that asset, retrieves memory, and decides
+                        state = engine.get_state(focused_asset)
+                        decision = await agent.act(state, focused_item=focused_asset, all_current_prices=engine.current_prices)
                         
-                        # --- PHASE 3: LOG & PERSIST ---
-                        logging.info(f"AGENT: {agent.id} | ITEM: {decision['item']} | ACTION: {decision['action'].value} | PRICE: {decision['price']} | REASON: {decision['reasoning']}")
-                        engine.ledger.record_interaction(
-                            InteractionLog(
-                                run_id=run_id,
+                        if decision:
+                            # Negotiate a counter-offer
+                            negotiated_price, negotiation_details = engine.negotiate_price(
                                 agent_id=agent.id,
-                                kind="action",
-                                action=decision["action"].value,
+                                action=decision["action"],
                                 item=decision["item"],
                                 price=decision["price"],
-                                details=decision["reasoning"],
                             )
+                            if negotiation_details:
+                                decision["price"] = negotiated_price
+                                engine.ledger.record_interaction(InteractionLog(**negotiation_details))
+
+                            # Execute action against the market engine
+                            tx = engine.process_action(
+                                agent, 
+                                decision["action"], 
+                                decision["item"], 
+                                decision["price"]
+                            )
+                            
+                            # Prepare log entry
+                            log_entry = ActionLog(
+                                agent_id=agent.id,
+                                action=decision["action"],
+                                price=decision["price"],
+                                reasoning=decision["reasoning"]
+                            )
+                            recent_actions.append(log_entry)
+                            
+                            # --- PHASE 3: LOG & PERSIST ---
+                            logging.info(f"AGENT: {agent.id} | ITEM: {decision['item']} | ACTION: {decision['action'].value} | PRICE: {decision['price']} | REASON: {decision['reasoning']}")
+                            engine.ledger.record_interaction(
+                                InteractionLog(
+                                    run_id=run_id,
+                                    agent_id=agent.id,
+                                    kind="action",
+                                    action=decision["action"].value,
+                                    item=decision["item"],
+                                    price=decision["price"],
+                                    details=decision["reasoning"],
+                                )
+                            )
+                            if tx:
+                                logging.info(f"  -> TRADE EXECUTED: {tx}")
+
+                    # Execute all agents concurrently
+                    # The GlobalRateLimiter will handle queuing if we exceed API limits
+                    await asyncio.gather(*[run_agent(a) for a in agents], return_exceptions=True)
+
+                    # --- PHASE 4: VISUALIZE ---
+                    layout["market_status"].update(create_market_table(engine))
+                    layout["recent_activity"].update(create_activity_table(agents, recent_actions))
+                    
+                    # Control simulation speed
+                    elapsed = asyncio.get_event_loop().time() - start_time
+                    sleep_time = max(0, Tick_Duration - elapsed)
+                    await asyncio.sleep(sleep_time)
+
+                    # --- CHECKPOINTS ---
+                    if args.checkpoint_every and tick % args.checkpoint_every == 0:
+                        payload = build_checkpoint(
+                            tick=tick,
+                            current_prices=engine.current_prices,
+                            agents=agents,
+                            transactions=engine.ledger.get_transactions(limit=args.checkpoint_transactions),
+                            interactions=engine.ledger.get_interactions(limit=args.checkpoint_interactions),
                         )
-                        if tx:
-                            logging.info(f"  -> TRADE EXECUTED: {tx}")
+                        filename = f"checkpoint_{tick:06d}.json"
+                        path = write_checkpoint(payload, args.checkpoint_dir, filename)
+                        logging.info(f"CHECKPOINT: {path}")
 
-                # Execute all agents concurrently
-                # The GlobalRateLimiter will handle queuing if we exceed API limits
-                await asyncio.gather(*[run_agent(a) for a in agents], return_exceptions=True)
-
-                # --- PHASE 4: VISUALIZE ---
-                layout["market_status"].update(create_market_table(engine))
-                layout["recent_activity"].update(create_activity_table(agents, recent_actions))
-                
-                # Control simulation speed
-                elapsed = asyncio.get_event_loop().time() - start_time
-                sleep_time = max(0, Tick_Duration - elapsed)
-                await asyncio.sleep(sleep_time)
-
-                # --- CHECKPOINTS ---
-                if args.checkpoint_every and tick % args.checkpoint_every == 0:
-                    payload = build_checkpoint(
-                        tick=tick,
-                        current_prices=engine.current_prices,
+                    if args.max_ticks and tick >= args.max_ticks:
+                        logging.info(f"Simulation completed after {tick} ticks.")
+                        break
+            finally:
+                if report_enabled:
+                    report_dir = generate_report(
+                        run_id=run_id,
+                        db_path="market.db",
+                        report_root=args.report_dir,
                         agents=agents,
-                        transactions=engine.ledger.get_transactions(limit=args.checkpoint_transactions),
-                        interactions=engine.ledger.get_interactions(limit=args.checkpoint_interactions),
+                        current_prices=engine.current_prices,
                     )
-                    filename = f"checkpoint_{tick:06d}.json"
-                    path = write_checkpoint(payload, args.checkpoint_dir, filename)
-                    logging.info(f"CHECKPOINT: {path}")
-
-                if args.max_ticks and tick >= args.max_ticks:
-                    logging.info(f"Simulation completed after {tick} ticks.")
-                    break
-        finally:
-            if not args.no_report:
-                generate_report(
-                    run_id=run_id,
-                    db_path="market.db",
-                    report_root=args.report_dir,
-                    agents=agents,
-                    current_prices=engine.current_prices,
-                )
+    finally:
+        transactions = engine.ledger.get_transactions_for_run(run_id)
+        summary = _build_run_summary(
+            run_id=run_id,
+            ticks=tick,
+            agents=agents,
+            transactions=transactions,
+            current_prices=engine.current_prices,
+            report_dir=report_dir,
+            report_enabled=report_enabled,
+        )
+        _render_run_summary(summary)
 
 if __name__ == "__main__":
     try:

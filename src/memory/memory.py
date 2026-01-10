@@ -6,11 +6,13 @@ It allows agents to store experiences (text) and retrieve them later based on se
 This forms the basis of Retrieval Augmented Generation (RAG) for the agents.
 """
 
-import chromadb
-from typing import List, Dict, Any
-import uuid
 import os
-from datetime import datetime, timezone
+import uuid
+from datetime import UTC, datetime
+from typing import Any
+
+import chromadb
+
 
 class AgentMemory:
     """
@@ -44,7 +46,7 @@ class AgentMemory:
             name=f"agent_memory_{agent_id}"
         )
 
-    def add_memory(self, text: str, metadata: Dict[str, Any] = None):
+    def add_memory(self, text: str, metadata: dict[str, Any] = None):
         """
         Stores a textual memory.
         
@@ -59,7 +61,7 @@ class AgentMemory:
             metadata = {}
         
         # Automatically add timestamp for temporal context
-        metadata.setdefault("timestamp", datetime.now(timezone.utc).timestamp())  # https://github.com/python/cpython/blob/main/Doc/library/datetime.rst (Context7 /python/cpython)
+        metadata.setdefault("timestamp", datetime.now(UTC).timestamp())  # https://github.com/python/cpython/blob/main/Doc/library/datetime.rst (Context7 /python/cpython)
 
         self.collection.add(
             documents=[text],
@@ -67,7 +69,7 @@ class AgentMemory:
             ids=[str(uuid.uuid4())] # Generate unique ID for the memory fragment
         )
 
-    def retrieve_memory(self, query: str, n_results: int = 5) -> List[str]:
+    def retrieve_memory(self, query: str, n_results: int = 5) -> list[str]:
         """
         Retrieves the most relevant memories for a given query.
         

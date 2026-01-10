@@ -2,7 +2,6 @@
 Tests for OrderBook matching behavior.
 """
 
-import pytest
 from src.market.order_book import OrderBook
 
 

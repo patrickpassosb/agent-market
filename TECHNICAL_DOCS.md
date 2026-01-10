@@ -118,6 +118,46 @@ Located in `src/market/ledger.py` and `src/market/schema.py`.
 -   **Schema:** `InteractionLog` table (id, timestamp, agent_id, kind, action, item, price, details).
 -   **Run IDs:** `run_id` tags each record for per-run reporting.
 -   **Purpose:** Persistent audit trail for agent actions and negotiation events.
+## Production Infrastructure
+
+The application is designed for cloud deployment on AWS EC2 using a containerized orchestration strategy.
+
+### 🏗 Orchestration (Docker Compose)
+The production environment uses `docker-compose.prod.yml` to manage three core services:
+1.  **Backend:** FastAPI server running the simulation and REST/WS endpoints.
+2.  **Frontend:** Next.js application served in standalone mode for optimal performance and minimal image size.
+3.  **Nginx:** High-performance reverse proxy that handles SSL termination (optional), request routing, and WebSocket upgrades.
+
+### 🌐 Network Topology
+- **Port 80:** Public-facing entry point managed by Nginx.
+- **`/`**: Routed to the Next.js frontend.
+- **`/api/`**: Proxied to the FastAPI backend.
+- **`/ws`**: WebSocket connection for real-time market data streaming.
+
+### 💾 Persistence Strategy
+Named Docker volumes are used to ensure data survives container restarts on the EC2 host:
+- `market_db`: Persists the SQLite database (`market.db`).
+- `chroma_db`: Persists the agent memory vector store.
+- `logs_data`: Retains simulation logs for debugging and auditing.
+
+### 🛠 Deployment Automation
+- `scripts/setup_ec2.sh`: One-time environment preparation (Docker, Git, Swap configuration).
+- `scripts/deploy.sh`: Automated deployment script that pulls the latest code, builds production-ready images, and performs a graceful restart.
+
+## CI/CD Pipeline Architecture
+
+The project employs a professional-grade automated pipeline via GitHub Actions:
+
+### 🛡️ Quality & Security Gates (CI)
+- **Fast Linting**: Powered by `Ruff` for simultaneous linting, formatting, and import sorting.
+- **Security Scans**: 
+  - `Bandit` analyzes the codebase for common Python security pitfalls.
+  - `pip-audit` cross-references dependencies against known vulnerability databases (OSV/GitHub).
+- **Docker Verification**: Every PR triggers a dry-run build to ensure the `Dockerfile` remains functional and secure.
+
+### 🚀 Delivery Flow (CD)
+- **Registry Integration**: On merges to `main`, Docker images are automatically built, tagged (SHA + Latest), and pushed to **GitHub Container Registry (GHCR)**.
+- **Rolling Updates**: The pipeline triggers remote deployment on production instances using secure SSH commands, ensuring zero-downtime restarts.
 
 ## Checkpoints
 

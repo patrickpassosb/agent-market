@@ -2,8 +2,9 @@
 Tests for the JournalistAgent narrative generation.
 """
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
 
 from src.agents.journalist import JournalistAgent
 from src.market.schema import MarketState, Transaction

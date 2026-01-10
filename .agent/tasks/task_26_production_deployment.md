@@ -28,10 +28,10 @@ Project runs locally via `docker-compose` and shell scripts. Environment variabl
 2. Evaluators need a live demo link or a simple one-command deployment path to verify "reproducibility" as per challenge requirements.
 
 ### Success Criteria
-- [ ] `docker-compose.prod.yml` created with restart policies.
-- [ ] Nginx configuration added to route `/api` and `/` traffic on Port 80.
-- [ ] Automated deployment script `scripts/deploy.sh` created.
-- [ ] README updated with "Live Demo" and AWS setup instructions.
+- [x] `docker-compose.prod.yml` created with restart policies.
+- [x] Nginx configuration added to route `/api` and `/` traffic on Port 80.
+- [x] Automated deployment script `scripts/deploy.sh` created.
+- [x] README updated with "Live Demo" and AWS setup instructions.
 
 ---
 

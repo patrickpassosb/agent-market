@@ -1,7 +1,9 @@
+from unittest.mock import AsyncMock, MagicMock, patch
+
 from fastapi.testclient import TestClient
+
 from src.api.server import app
-import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
+
 
 def test_websocket_connection():
     # Use context manager to trigger lifespan

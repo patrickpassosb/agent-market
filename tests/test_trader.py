@@ -2,11 +2,14 @@
 Tests for Trader decision-making and error handling.
 """
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+
 from src.agents.trader import Trader
-from src.market.schema import MarketState, AgentAction
+from src.market.schema import AgentAction, MarketState
 from src.utils.personas import PersonaStrategy
+
 
 class TestTrader:
     """Unit tests for Trader agent logic"""

@@ -6,6 +6,7 @@ This module centralizes all prompt templates for the Trader agent.
 
 from src.market.schema import QUOTE_CURRENCY
 
+
 def get_trader_system_prompt(
     agent_id: str,
     persona: str,

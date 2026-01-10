@@ -7,19 +7,20 @@ It adds narrative flavor to the simulation by converting raw data (price, volume
 into human-readable financial news.
 """
 
-from pydantic import BaseModel, Field
-import litellm
-from litellm import completion, acompletion
-from typing import List, Optional
 import os
 
-from src.market.schema import MarketState, Transaction, QUOTE_CURRENCY
-from src.utils.personas import get_models_for_tier
+import litellm
+from litellm import acompletion
+from pydantic import BaseModel, Field
+
+from src.market.schema import QUOTE_CURRENCY, MarketState, Transaction
 from src.utils.concurrency import GlobalRateLimiter
+from src.utils.personas import get_models_for_tier
 
 litellm.enable_json_schema_validation = True
 
 import re
+
 
 def _sanitize_string(text: str) -> str:
     """Strip HTML tags and excessive whitespace."""
@@ -69,7 +70,7 @@ class JournalistAgent:
         self.model_name = model_name
         self.api_key = os.getenv("GEMINI_API_KEY")
 
-    async def analyze(self, market_state: MarketState, recent_transactions: List[Transaction]) -> JournalistHeadline:
+    async def analyze(self, market_state: MarketState, recent_transactions: list[Transaction]) -> JournalistHeadline:
         """
         Analyzes the market state and recent history to generate a news headline.
         """
@@ -134,6 +135,6 @@ class JournalistAgent:
 
             content = response.choices[0].message.content
             return _parse_structured_response(JournalistHeadline, content)
-        except Exception as e:
+        except Exception:
             # Fallback if LLM fails
             return JournalistHeadline(headline=f"{asset} Activity Recorded", body=f"Trading volume remains steady in the {asset} market.")

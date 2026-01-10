@@ -8,9 +8,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.market.engine import MarketEngine
-from src.market.schema import AgentAction, Transaction, SUPPORTED_ASSETS
 from src.agents.portfolio import Portfolio
+from src.market.engine import MarketEngine
+from src.market.schema import AgentAction, Transaction
 
 
 @pytest.fixture

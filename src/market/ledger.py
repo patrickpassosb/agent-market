@@ -5,12 +5,13 @@ This module handles the permanent storage of market transactions using SQLModel.
 It abstracts the database connection and session management.
 """
 
-from typing import List, Optional
 import logging
-from sqlmodel import SQLModel, Session, create_engine, select
-import os
 import sqlite3
-from .schema import Transaction, InteractionLog
+
+from sqlmodel import Session, SQLModel, create_engine, select
+
+from .schema import InteractionLog, Transaction
+
 
 class Ledger:
     """
@@ -88,7 +89,7 @@ class Ledger:
             session.refresh(transaction) # Refresh to get the auto-generated ID
             return transaction
 
-    def get_transactions(self, limit: int = 100) -> List[Transaction]:
+    def get_transactions(self, limit: int = 100) -> list[Transaction]:
         """
         Retrieves the most recent transactions from the ledger.
         
@@ -102,6 +103,17 @@ class Ledger:
             statement = select(Transaction).order_by(Transaction.timestamp.desc()).limit(limit)
             return list(session.exec(statement).all())
 
+    def get_transactions_for_run(self, run_id: str | None) -> list[Transaction]:
+        """
+        Retrieves all transactions for a specific run, ordered by time ascending.
+        """
+        with Session(self.engine) as session:
+            statement = select(Transaction)
+            if run_id:
+                statement = statement.where(Transaction.run_id == run_id)
+            statement = statement.order_by(Transaction.timestamp.asc())
+            return list(session.exec(statement).all())
+
     def record_interaction(self, interaction: InteractionLog) -> InteractionLog:
         """
         Persists a non-transaction interaction (actions, negotiations) to the database.
@@ -112,10 +124,21 @@ class Ledger:
             session.refresh(interaction)
             return interaction
 
-    def get_interactions(self, limit: int = 100) -> List[InteractionLog]:
+    def get_interactions(self, limit: int = 100) -> list[InteractionLog]:
         """
         Retrieves the most recent interaction logs.
         """
         with Session(self.engine) as session:
             statement = select(InteractionLog).order_by(InteractionLog.timestamp.desc()).limit(limit)
+            return list(session.exec(statement).all())
+
+    def get_interactions_for_run(self, run_id: str | None) -> list[InteractionLog]:
+        """
+        Retrieves all interactions for a specific run, ordered by time ascending.
+        """
+        with Session(self.engine) as session:
+            statement = select(InteractionLog)
+            if run_id:
+                statement = statement.where(InteractionLog.run_id == run_id)
+            statement = statement.order_by(InteractionLog.timestamp.asc())
             return list(session.exec(statement).all())

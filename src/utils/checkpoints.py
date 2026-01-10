@@ -4,14 +4,13 @@ Checkpoint utilities for saving simulation state snapshots.
 
 from __future__ import annotations
 
-from typing import Any, Iterable, Dict
 import json
 import os
-from datetime import datetime, timezone
+from collections.abc import Iterable
+from datetime import UTC, datetime
+from typing import Any
 
 from pydantic import BaseModel
-
-from src.market.schema import SUPPORTED_ASSETS
 
 
 def _model_to_json_dict(model: BaseModel) -> dict:
@@ -23,7 +22,7 @@ def _model_to_json_dict(model: BaseModel) -> dict:
 
 def build_checkpoint(
     tick: int,
-    current_prices: Dict[str, float],
+    current_prices: dict[str, float],
     agents: Iterable[Any],
     transactions: Iterable[BaseModel],
     interactions: Iterable[BaseModel],
@@ -32,7 +31,7 @@ def build_checkpoint(
     Build a JSON-serializable checkpoint payload.
     """
     return {
-        "timestamp": datetime.now(timezone.utc).isoformat(),  # https://github.com/python/cpython/blob/main/Doc/library/datetime.rst (Context7 /python/cpython)
+        "timestamp": datetime.now(UTC).isoformat(),  # https://github.com/python/cpython/blob/main/Doc/library/datetime.rst (Context7 /python/cpython)
         "tick": tick,
         "market_state": {
             "current_prices": current_prices,

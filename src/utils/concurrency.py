@@ -7,7 +7,7 @@ to prevent API abuse and handle high-scale agent simulations.
 
 import asyncio
 import time
-from typing import Optional
+
 
 class AsyncRateLimiter:
     """
@@ -44,7 +44,7 @@ class GlobalRateLimiter:
     """
     Singleton-style rate limiter to be shared across all agents.
     """
-    _instance: Optional[AsyncRateLimiter] = None
+    _instance: AsyncRateLimiter | None = None
     
     @classmethod
     def get_instance(cls, max_rpm: int = 30) -> AsyncRateLimiter:

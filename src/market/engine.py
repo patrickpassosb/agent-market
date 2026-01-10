@@ -12,13 +12,13 @@ Responsibilities:
 4. Expose market state to agents.
 """
 
-from typing import List, Any, Dict, Optional
 import math
-from datetime import datetime
+from typing import Any
 
 from .ledger import Ledger
 from .order_book import OrderBook
-from .schema import Transaction, AgentAction, MarketState, SUPPORTED_ASSETS
+from .schema import SUPPORTED_ASSETS, AgentAction, MarketState, Transaction
+
 
 class MarketEngine:
     """
@@ -33,7 +33,7 @@ class MarketEngine:
     def __init__(
         self,
         db_path: str = "market.db",
-        run_id: Optional[str] = None,
+        run_id: str | None = None,
         initial_price: float = 0.005, # Default seed price in BTC
     ):
         """
@@ -51,12 +51,12 @@ class MarketEngine:
             initial_price = 0.005
             
         # Initialize prices for all assets
-        self.current_prices: Dict[str, float] = {
+        self.current_prices: dict[str, float] = {
             asset: float(initial_price) for asset in SUPPORTED_ASSETS
         }
         
         self.total_volume = 0
-        self.price_history: Dict[str, List[float]] = {
+        self.price_history: dict[str, list[float]] = {
             asset: [float(initial_price)] for asset in SUPPORTED_ASSETS
         }
         
@@ -107,7 +107,7 @@ class MarketEngine:
             order_book_summary=summary
         )
 
-    def process_action(self, agent: Any, action: AgentAction, item: str, price: float = 0.0) -> Optional[Transaction]:
+    def process_action(self, agent: Any, action: AgentAction, item: str, price: float = 0.0) -> Transaction | None:
         """
         Processes an action submitted by an agent.
         
@@ -235,7 +235,7 @@ class MarketEngine:
             "volatility_index": round(avg_vol * 100, 2)
         }
 
-    def negotiate_price(self, agent_id: str, action: AgentAction, item: str, price: float) -> tuple[float, Optional[dict]]:
+    def negotiate_price(self, agent_id: str, action: AgentAction, item: str, price: float) -> tuple[float, dict | None]:
         """
         Provides a counter-offer price based on current best quotes.
         """

@@ -4,14 +4,16 @@ Tests for analysis and report generation modules.
 
 import os
 import tempfile
-import pytest
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
+
+import pytest
+
 from src.analysis.chart import plot_market_history
 from src.analysis.report import generate_report
-from src.market.schema import Transaction, InteractionLog
 from src.market.ledger import Ledger
-from sqlmodel import Session, SQLModel, create_engine
+from src.market.schema import InteractionLog, Transaction
+
 
 @pytest.fixture
 def temp_dir():
@@ -30,7 +32,7 @@ def test_plot_market_history(temp_dir):
         seller_id="Agent_2", 
         item="AAPL", 
         price=150.0,
-        timestamp=datetime.now(timezone.utc)
+        timestamp=datetime.now(UTC)
     )
     ledger.record_transaction(tx)
 
@@ -52,7 +54,7 @@ def test_generate_report(temp_dir):
         seller_id="Agent_2", 
         item="AAPL", 
         price=0.01,
-        timestamp=datetime.now(timezone.utc)
+        timestamp=datetime.now(UTC)
     )
     ledger.record_transaction(tx)
     
@@ -64,7 +66,7 @@ def test_generate_report(temp_dir):
         item="AAPL", 
         price=0.01, 
         details="Test",
-        timestamp=datetime.now(timezone.utc)
+        timestamp=datetime.now(UTC)
     )
     ledger.record_interaction(log)
 
