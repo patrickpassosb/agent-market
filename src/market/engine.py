@@ -77,10 +77,10 @@ class MarketEngine:
             bullish_pct = (total_bids / total) * 100
             
         label = "Neutral"
-        if bullish_pct > 65: label = "Bullish"
-        elif bullish_pct > 85: label = "Super Bullish"
-        elif bullish_pct < 35: label = "Bearish"
+        if bullish_pct > 85: label = "Super Bullish"
+        elif bullish_pct > 65: label = "Bullish"
         elif bullish_pct < 15: label = "Super Bearish"
+        elif bullish_pct < 35: label = "Bearish"
         
         return {
             "bullish_pct": round(bullish_pct, 1),

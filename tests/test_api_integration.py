@@ -16,8 +16,8 @@ def test_websocket_connection():
             mock_sim.start = AsyncMock() # Ensure start is awaitable
             mock_sim.stop = AsyncMock()  # Ensure stop is awaitable
             
-            with TestClient(app) as client:
-                with client.websocket_connect("/ws") as websocket:
+            with TestClient(app, base_url="http://localhost") as client:
+                with client.websocket_connect("/ws", headers={"Host": "localhost"}) as websocket:
                     # The server sends a ticker update immediately upon connection
                     data = websocket.receive_json()
                     assert "type" in data

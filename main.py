@@ -1,4 +1,4 @@
-"Multi-Agent Marketplace Simulation - Entry Point.
+"""Multi-Agent Marketplace Simulation - Entry Point.
 
 This script orchestrates the entire market simulation. It:
 1. Initializes a MarketEngine (orderbook + ledger).
@@ -10,7 +10,7 @@ Usage:
     python main.py
 
 Stop the simulation with Ctrl+C (SIGINT). The script will handle graceful shutdown.
-"
+"""
 
 import os
 import argparse

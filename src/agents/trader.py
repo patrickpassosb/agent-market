@@ -45,7 +45,7 @@ def _parse_structured_response(model_cls: type[BaseModel], content):
         obj = model_cls.model_validate_json(content)
         
     # Sanitize all string fields
-    for field in obj.model_fields:
+    for field in model_cls.model_fields:
         val = getattr(obj, field)
         if isinstance(val, str):
             setattr(obj, field, _sanitize_string(val))

@@ -60,7 +60,7 @@ def plot_market_history(db_path: str = "market.db", output_dir: str = "plots"):
     # Combine buyer and seller counts
     agent_counts = df['buyer_id'].value_counts().add(df['seller_id'].value_counts(), fill_value=0)
     
-    sns.barplot(x=agent_counts.index, y=agent_counts.values, palette="viridis")
+    sns.barplot(x=agent_counts.index, y=agent_counts.values, hue=agent_counts.index, palette="viridis", legend=False)
     plt.title('Trading Activity by Agent')
     plt.xlabel('Agent ID')
     plt.ylabel('Total Transactions (Buy + Sell)')
