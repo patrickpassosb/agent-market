@@ -6,9 +6,13 @@ type MarketPulseProps = {
     tickers: Record<string, number>;
     previous: Record<string, number>;
     status: string;
+    sentiment: {
+        bullish_pct: number;
+        label: string;
+    };
 };
 
-export default function MarketPulse({ tickers, previous, status }: MarketPulseProps) {
+export default function MarketPulse({ tickers, previous, status, sentiment }: MarketPulseProps) {
     const assets = Object.keys(tickers);
 
     return (
@@ -64,11 +68,11 @@ export default function MarketPulse({ tickers, previous, status }: MarketPulsePr
             <div className="mt-4 rounded-2xl bg-gradient-to-br from-secondary/20 to-primary/10 p-4 border border-white/5">
                 <p className="text-[10px] uppercase tracking-widest text-white/40">Market Sentiment</p>
                 <div className="mt-2 flex items-end justify-between">
-                    <p className="text-xl font-display font-bold text-white">Neutral</p>
-                    <p className="text-xs text-primary font-medium">52% Bullish</p>
+                    <p className="text-xl font-display font-bold text-white">{sentiment.label}</p>
+                    <p className="text-xs text-primary font-medium">{sentiment.bullish_pct}% Bullish</p>
                 </div>
                 <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-white/5">
-                    <div className="h-full bg-primary" style={{ width: '52%' }} />
+                    <div className="h-full bg-primary transition-all duration-500" style={{ width: `${sentiment.bullish_pct}%` }} />
                 </div>
             </div>
         </div>

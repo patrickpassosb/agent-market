@@ -9,22 +9,42 @@ into human-readable financial news.
 
 from pydantic import BaseModel, Field
 import litellm
-from litellm import completion
+from litellm import completion, acompletion
 from typing import List, Optional
 import os
 
 from src.market.schema import MarketState, Transaction, QUOTE_CURRENCY
 from src.utils.personas import get_models_for_tier
+from src.utils.concurrency import GlobalRateLimiter
 
 litellm.enable_json_schema_validation = True
 
+import re
+
+def _sanitize_string(text: str) -> str:
+    """Strip HTML tags and excessive whitespace."""
+    if not text:
+        return ""
+    # Remove HTML tags
+    text = re.sub(r"<[^>]*>", "", text)
+    # Normalize whitespace
+    return " ".join(text.split())
+
 def _parse_structured_response(model_cls: type[BaseModel], content):
-    """Normalize structured LLM output into a Pydantic model."""
+    """Normalize structured LLM output into a Pydantic model with sanitization."""
     if isinstance(content, model_cls):
-        return content
-    if isinstance(content, dict):
-        return model_cls.model_validate(content)
-    return model_cls.model_validate_json(content)
+        obj = content
+    elif isinstance(content, dict):
+        obj = model_cls.model_validate(content)
+    else:
+        obj = model_cls.model_validate_json(content)
+        
+    # Sanitize all string fields
+    for field in obj.model_fields:
+        val = getattr(obj, field)
+        if isinstance(val, str):
+            setattr(obj, field, _sanitize_string(val))
+    return obj
 
 class JournalistHeadline(BaseModel):
     """Structured output format for journalist responses."""
@@ -49,7 +69,7 @@ class JournalistAgent:
         self.model_name = model_name
         self.api_key = os.getenv("GEMINI_API_KEY")
 
-    def analyze(self, market_state: MarketState, recent_transactions: List[Transaction]) -> JournalistHeadline:
+    async def analyze(self, market_state: MarketState, recent_transactions: List[Transaction]) -> JournalistHeadline:
         """
         Analyzes the market state and recent history to generate a news headline.
         """
@@ -86,16 +106,19 @@ class JournalistAgent:
         """
 
         try:
+            # Rate limiting
+            await GlobalRateLimiter.get_instance().wait()
+
             fallback_models = get_models_for_tier("analytical")
             if self.model_name not in fallback_models:
                 fallback_models.insert(0, self.model_name)
 
             response = None
             last_error: Exception | None = None
-            # LiteLLM fallbacks per Context7 docs: /websites/litellm_ai (fallbacks + retries).
+            # LiteLLM fallbacks per Context7 docs: /berriai/litellm (async acompletion).
             for model in fallback_models:
                 try:
-                    response = completion(
+                    response = await acompletion(
                         model=model,
                         messages=[{"role": "user", "content": prompt}],
                         response_format=JournalistHeadline,

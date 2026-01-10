@@ -45,10 +45,8 @@ class MarketEngine:
         """
         self.ledger = Ledger(db_path)
         
-        # Initialize an Order Book for every supported asset
-        self.order_books: Dict[str, OrderBook] = {
-            asset: OrderBook() for asset in SUPPORTED_ASSETS
-        }
+        # Use a single OrderBook instance for all assets (Phase 3 refactor)
+        self.order_book = OrderBook()
         
         if not isinstance(initial_price, (int, float)) or not math.isfinite(initial_price) or initial_price <= 0:
             initial_price = 0.005
@@ -58,7 +56,36 @@ class MarketEngine:
             asset: float(initial_price) for asset in SUPPORTED_ASSETS
         }
         
+        self.total_volume = 0
+        self.price_history: Dict[str, List[float]] = {
+            asset: [float(initial_price)] for asset in SUPPORTED_ASSETS
+        }
+        
         self.run_id = run_id
+
+    def get_global_sentiment(self) -> dict:
+        """
+        Calculate global sentiment based on total bid/ask counts across the order book.
+        """
+        summary = self.order_book.get_summary() # Returns global aggregate if no item passed
+        total_bids = summary["bids_count"]
+        total_asks = summary["asks_count"]
+        
+        total = total_bids + total_asks
+        bullish_pct = 50.0
+        if total > 0:
+            bullish_pct = (total_bids / total) * 100
+            
+        label = "Neutral"
+        if bullish_pct > 65: label = "Bullish"
+        elif bullish_pct > 85: label = "Super Bullish"
+        elif bullish_pct < 35: label = "Bearish"
+        elif bullish_pct < 15: label = "Super Bearish"
+        
+        return {
+            "bullish_pct": round(bullish_pct, 1),
+            "label": label
+        }
 
     def get_state(self, item: str = "AAPL") -> MarketState:
         """
@@ -73,9 +100,9 @@ class MarketEngine:
             MarketState: Object containing price and order book summary.
         """
         # Fallback for invalid items
-        target_item = item if item in self.order_books else SUPPORTED_ASSETS[0]
+        target_item = item if item in SUPPORTED_ASSETS else SUPPORTED_ASSETS[0]
         
-        summary = self.order_books[target_item].get_summary()
+        summary = self.order_book.get_summary(target_item)
         return MarketState(
             current_price=self.current_prices.get(target_item, 0.0),
             order_book_summary=summary
@@ -87,7 +114,7 @@ class MarketEngine:
         
         This method acts as the central transaction coordinator. It:
         1. Validates the input arguments.
-        2. Routes the order to the correct `OrderBook`.
+        2. Routes the order to the single `OrderBook`.
         3. If a match occurs, it validates the trade against the agent's `Portfolio`.
         4. If valid, records the transaction in the `Ledger`.
         
@@ -108,18 +135,15 @@ class MarketEngine:
             return None
 
         # Validate Item
-        if not isinstance(item, str) or item not in self.order_books:
+        if not isinstance(item, str) or item not in SUPPORTED_ASSETS:
             return None
 
         # Validate Price
         if not isinstance(price, (int, float)) or not math.isfinite(price) or price <= 0:
             return None
 
-        # Route action to the appropriate OrderBook
-        target_book = self.order_books[item]
-
         if action == AgentAction.BUY:
-            transaction = target_book.add_buy(agent.id, item, float(price))
+            transaction = self.order_book.add_buy(agent.id, item, float(price))
             
             # If trade matched, execute against portfolio
             if transaction:
@@ -136,7 +160,7 @@ class MarketEngine:
                     return None
                     
         elif action == AgentAction.SELL:
-            transaction = target_book.add_sell(agent.id, item, float(price))
+            transaction = self.order_book.add_sell(agent.id, item, float(price))
             
             # If trade matched, execute against portfolio
             if transaction:
@@ -162,19 +186,51 @@ class MarketEngine:
             
             # 2. Update Market State for this asset
             self.current_prices[item] = transaction.price
+            self.total_volume += 1
+            self.price_history[item].append(transaction.price)
+            if len(self.price_history[item]) > 50:
+                self.price_history[item].pop(0)
             
             return transaction
         
         return None
 
+    def get_market_metrics(self) -> dict:
+        """
+        Calculate global market metrics like volume and volatility.
+        """
+        # Calculate volatility as average price deviation across all assets
+        vol_ratios = []
+        for asset, prices in self.price_history.items():
+            if len(prices) < 2:
+                continue
+            # Simple volatility: (max - min) / avg
+            avg = sum(prices) / len(prices)
+            if avg > 0:
+                vol = (max(prices) - min(prices)) / avg
+                vol_ratios.append(vol)
+        
+        avg_vol = sum(vol_ratios) / len(vol_ratios) if vol_ratios else 0.0
+        
+        vol_label = "Low"
+        if avg_vol > 0.15: vol_label = "Extreme"
+        elif avg_vol > 0.08: vol_label = "High"
+        elif avg_vol > 0.03: vol_label = "Medium"
+        
+        return {
+            "total_volume": self.total_volume,
+            "volatility": vol_label,
+            "volatility_index": round(avg_vol * 100, 2)
+        }
+
     def negotiate_price(self, agent_id: str, action: AgentAction, item: str, price: float) -> tuple[float, Optional[dict]]:
         """
         Provides a counter-offer price based on current best quotes.
         """
-        if item not in self.order_books:
+        if item not in SUPPORTED_ASSETS:
             return price, None
             
-        best_bid, best_ask = self.order_books[item].get_best_quotes(item)
+        best_bid, best_ask = self.order_book.get_best_quotes(item)
 
         if action == AgentAction.BUY and best_ask is not None and price < best_ask:
             counter_price = (price + best_ask) / 2.0

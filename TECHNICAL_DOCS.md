@@ -15,53 +15,59 @@ To maximize performance within rate limits and budget, we employ a tiered model 
 
 ## System Architecture
 
-The system is a **discrete-time tick-based simulation** where autonomous AI agents trade assets in a centralized market.
+The system is a **discrete-time tick-based asynchronous simulation** where autonomous AI agents trade assets in a centralized market.
 
 ### Core Components
 
-1.  **Market Engine (`src/market/`)**: Handles order matching, transaction recording, and time.
-2.  **Agents (`src/agents/`)**: Autonomous entities that perceive the market and make decisions using LLMs.
-3.  **Memory (`src/memory/`)**: RAG-style memory for each agent.
-4.  **Orchestrator (`main.py`)**: Main loop that synchronizes time, UI, and agent turns.
+1.  **Market Engine (`src/market/`)**: Handles order matching, transaction recording, and price discovery.
+2.  **Simulation Runner (`src/simulation/runner.py`)**: Asynchronous orchestrator that manages the tick loop and agent concurrency.
+3.  **API Server (`src/api/server.py`)**: FastAPI wrapper providing REST and WebSocket access to the live simulation.
+4.  **Agents (`src/agents/`)**: Autonomous entities that perceive the market and make decisions using LLMs.
+5.  **Memory (`src/memory/`)**: RAG-style memory for each agent using ChromaDB.
 
-### Execution Flow (Game Loop)
+### Execution Flow (Async Game Loop)
+
+The simulation uses `asyncio` to handle IO-bound LLM calls concurrently, maximizing tick efficiency without blocking.
 
 ```mermaid
 sequenceDiagram
-    participant Main as Orchestrator
+    participant Main as SimulationRunner
     participant Engine as MarketEngine
-    participant Agent as TraderAgent
-    participant LLM as LLM Provider
+    participant Agents as TraderAgents (Async)
+    participant LLM as LLM Provider (LiteLLM)
     participant DB as Ledger/Memory
 
-    loop Every Tick
+    loop Every Tick (Async)
         Main->>Engine: get_state()
-        Engine-->>Main: MarketState (Price, Order Book)
+        Engine-->>Main: MarketState
         
-        Main->>Agent: act(MarketState)
+        Note over Main, Agents: Batch Execution (e.g. 4 agents at a time)
+        Main->>Agents: gather(act(MarketState))
         
         rect rgb(240, 240, 240)
-            Note right of Agent: Cognitive Cycle
-            Agent->>DB: retrieve_memory(context)
-            DB-->>Agent: Relevant Past Memories
-            Agent->>LLM: Prompt (Persona + Market + Memory)
-            LLM-->>Agent: JSON Decision (BUY/SELL/HOLD)
-            Agent->>DB: remember(Reasoning)
+            Note right of Agents: Cognitive Cycle (Async)
+            Agents->>DB: retrieve_memory()
+            Agents->>LLM: acompletion(Persona + Market + Memory)
+            LLM-->>Agents: Decision
+            Agents->>DB: remember(Reasoning)
         end
         
-        Agent-->>Main: Action
+        Agents-->>Main: Actions
         
-        Main->>Engine: process_action(Action)
-        
-        alt Action is Trade
-            Engine->>OrderBook: match_order()
-            OrderBook-->>Engine: Transaction
+        loop For each Action
+            Main->>Engine: process_action(Action)
             Engine->>DB: record_transaction()
         end
         
-        Main->>UI: Update Dashboard
+        Main->>UI/WS: Update Dashboard/Broadcast
     end
 ```
+
+### Async Orchestration
+
+-   **Concurrency:** Agents are processed in batches using `asyncio.gather`. This prevents the "serial bottleneck" where one slow LLM call pauses the entire market.
+-   **Event Loop:** Both the API server and the simulation run on the same event loop, eliminating the need for complex threading locks.
+
 
 ### Market Engine (`src/market/engine.py`)
 

@@ -55,10 +55,23 @@ Copy `.env.example` to `.env` and add keys:
 - `OPENAI_API_KEY` (optional; not used by default)
  - `OPENROUTER_API_KEY` and `OPENROUTER_MODEL_*` if using OpenRouter
 
-### Run
+### Run (Terminal UI)
 ```bash
 uv run python main.py
 ```
+
+### Run (Web API & Dashboard)
+1. Start the API Server:
+   ```bash
+   uv run uvicorn src.api.server:app --reload --port 8000
+   ```
+2. Start the Frontend Dashboard (requires Node.js):
+   ```bash
+   cd frontend
+   npm install
+   npm run dev
+   ```
+   Access the premium dashboard at `http://localhost:3000`.
 
 ## Demo Guide
 

@@ -13,21 +13,43 @@ import math
 import random
 from pydantic import BaseModel, Field
 import litellm
-from litellm import completion
+from litellm import completion, acompletion
 from .base import BaseAgent
 from src.market.schema import MarketState, AgentAction, SUPPORTED_ASSETS, QUOTE_CURRENCY
-from src.utils.personas import get_models_for_tier, get_persona_tier
+from src.utils.personas import get_models_for_tier, get_persona_tier, PersonaStrategy, PERSONA_MAP
+from src.prompts.trader import get_trader_system_prompt
+from src.utils.concurrency import GlobalRateLimiter
 
 # --- Data Models for LLM Output ---
 
 litellm.enable_json_schema_validation = True
 
+import re
+
+def _sanitize_string(text: str) -> str:
+    """Strip HTML tags and excessive whitespace."""
+    if not text:
+        return ""
+    # Remove HTML tags
+    text = re.sub(r"<[^>]*>", "", text)
+    # Normalize whitespace
+    return " ".join(text.split())
+
 def _parse_structured_response(model_cls: type[BaseModel], content):
+    """Normalize structured LLM output into a Pydantic model with sanitization."""
     if isinstance(content, model_cls):
-        return content
-    if isinstance(content, dict):
-        return model_cls.model_validate(content)
-    return model_cls.model_validate_json(content)
+        obj = content
+    elif isinstance(content, dict):
+        obj = model_cls.model_validate(content)
+    else:
+        obj = model_cls.model_validate_json(content)
+        
+    # Sanitize all string fields
+    for field in obj.model_fields:
+        val = getattr(obj, field)
+        if isinstance(val, str):
+            setattr(obj, field, _sanitize_string(val))
+    return obj
 
 class TraderDecision(BaseModel):
     """
@@ -61,14 +83,16 @@ class Trader(BaseAgent):
         model_name (str): The specific LLM model identifier (e.g., 'groq/llama-3.1-8b-instant').
     """
 
-    def __init__(self, agent_id: str, persona: str, model_name: str = "groq/llama-3.1-8b-instant"):
+    def __init__(self, agent_id: str, strategy: PersonaStrategy, model_name: str = "groq/llama-3.1-8b-instant"):
         """
         Args:
             agent_id (str): Unique ID.
-            persona (str): Strategy description.
+            strategy (PersonaStrategy): The trading strategy enum.
             model_name (str): The LLM to use for inference.
         """
+        persona = PERSONA_MAP[strategy]
         super().__init__(agent_id, persona)
+        self.strategy = strategy
         self.model_name = model_name
     
     def _get_persona_constraints(self) -> str:
@@ -76,36 +100,34 @@ class Trader(BaseAgent):
         Return specific behavioral rules based on persona type.
         This helps enforce persona adherence.
         """
-        p_lower = self.persona.lower()
-        
         # Panic sellers MUST sell on drops
-        if "panic" in p_lower:
+        if self.strategy == PersonaStrategy.PANIC:
             return "CRITICAL: You MUST sell immediately if the current price is below your average cost."
         
         # Contrarians MUST go against the majority
-        elif "contrar" in p_lower:
+        elif self.strategy == PersonaStrategy.CONTRARIAN:
             return "CRITICAL: You MUST trade AGAINST the majority. If bids > asks, you MUST sell. If asks > bids, you MUST buy."
         
         # Market makers MUST provide liquidity on both sides
-        elif "market maker" in p_lower:
+        elif self.strategy == PersonaStrategy.MARKET_MAKER:
             return "CRITICAL: Your goal is to profit from the spread. You should place BOTH a buy order below market and a sell order above market."
         
         # FOMO buyers buy on spikes
-        elif "fomo" in p_lower:
+        elif self.strategy == PersonaStrategy.FOMO:
             return "You are driven by fear of missing out. Buy aggressively when prices are rising."
         
         # Conservative investors only buy dips
-        elif "conservative" in p_lower or "long-term" in p_lower:
+        elif self.strategy == PersonaStrategy.CONSERVATIVE or self.strategy == PersonaStrategy.VALUE:
             return "You only buy when prices are significantly below historical averages. Be patient and selective."
         
         # DCA buyers buy every tick
-        elif "dca" in p_lower or "dollar cost" in p_lower:
+        elif self.strategy == PersonaStrategy.DCA:
             return "You MUST buy a small amount every single tick, regardless of price."
         
         # Default: no special constraints
         return "Follow your general strategy as described in your persona."
 
-    def act(self, market_state: MarketState, focused_item: str, all_current_prices: Dict[str, float]) -> Optional[dict]:
+    async def act(self, market_state: MarketState, focused_item: str, all_current_prices: Dict[str, float]) -> Optional[dict]:
         """
         Execute one decision cycle.
         
@@ -127,35 +149,21 @@ class Trader(BaseAgent):
         constraints = self._get_persona_constraints()
 
         # 4. Construct enhanced system prompt
-        system_prompt = f"""You are a trading agent in a Bitcoin-denominated Stock Market.
-Your ID: {self.id}
-Your Persona: {self.persona}
-{constraints}
-
-Focus Asset: {focused_item}
-Current Market State ({focused_item}/{QUOTE_CURRENCY}):
-- Price: {market_state.current_price:.6f} {QUOTE_CURRENCY}
-- Best Bid: {market_state.order_book_summary.get('best_bid', 'N/A')}
-- Best Ask: {market_state.order_book_summary.get('best_ask', 'N/A')}
-- Buy Orders: {market_state.order_book_summary.get('bids_count', 0)}
-- Sell Orders: {market_state.order_book_summary.get('asks_count', 0)}
-
-Your Portfolio:
-- Cash: {portfolio_metrics['cash']:.4f} {QUOTE_CURRENCY}
-- Positions: {portfolio_metrics['positions']}
-- Total P/L: {portfolio_metrics['total_pnl']:.4f} {QUOTE_CURRENCY}
-- ROI: {portfolio_metrics['roi']:.1f}%
-
-Recent Trading History:
-{memory_context}
-
-Goal: Maximize profit while STRICTLY following your persona constraints.
-Decide: BUY, SELL, HOLD, or REFLECTION (internal thought only).
-Ensure your price is in {QUOTE_CURRENCY} (e.g. 0.005).
-"""
+        system_prompt = get_trader_system_prompt(
+            agent_id=self.id,
+            persona=self.persona,
+            constraints=constraints,
+            focused_item=focused_item,
+            market_state=market_state,
+            portfolio_metrics=portfolio_metrics,
+            memory_context=memory_context
+        )
 
         # 3. Call LLM
         try:
+            # Rate limiting
+            await GlobalRateLimiter.get_instance().wait()
+            
             tier = get_persona_tier(self.persona)
             fallback_models = get_models_for_tier(tier)
             if self.model_name not in fallback_models:
@@ -163,11 +171,11 @@ Ensure your price is in {QUOTE_CURRENCY} (e.g. 0.005).
 
             response = None
             last_error: Exception | None = None
-            # LiteLLM fallbacks per Context7 docs: /websites/litellm_ai (fallbacks + retries).
+            # LiteLLM fallbacks per Context7 docs: /berriai/litellm (async acompletion).
             for model in fallback_models:
                 try:
                     # We use litellm's `response_format` to enforce the Pydantic schema
-                    response = completion(
+                    response = await acompletion(
                         model=model,
                         messages=[
                             {"role": "system", "content": system_prompt},

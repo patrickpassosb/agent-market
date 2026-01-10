@@ -101,7 +101,7 @@ class OrderBook:
                     seller_id=seller_id,
                     item=item,
                     price=execution_price,
-                    timestamp=datetime.utcnow()
+                    timestamp=datetime.now(timezone.utc)
                 )
         
         # No match found, add to order book as a resting order
@@ -157,11 +157,13 @@ class OrderBook:
         heapq.heappush(asks, (price, timestamp, agent_id))
         return None
 
-    def get_summary(self) -> dict:
+    def get_summary(self, item: Optional[str] = None) -> dict:
         """
         Returns a simplified summary of the current order book state.
         
-        Useful for public feeds or agent observation.
+        Args:
+            item (Optional[str]): If provided, returns summary for this asset only.
+                                 Otherwise, returns an aggregate summary.
         
         Returns:
             dict: {
@@ -171,6 +173,19 @@ class OrderBook:
                 "asks_count": int
             }
         """
+        if item:
+            bids = self.bids.get(item, [])
+            asks = self.asks.get(item, [])
+            best_bid = -bids[0][0] if bids else None
+            best_ask = asks[0][0] if asks else None
+            return {
+                "best_bid": best_bid,
+                "best_ask": best_ask,
+                "bids_count": len(bids),
+                "asks_count": len(asks)
+            }
+
+        # Global aggregation (fallback)
         best_bid = None
         for heap in self.bids.values():
             if not heap:

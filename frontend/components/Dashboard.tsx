@@ -50,6 +50,8 @@ export default function Dashboard() {
   const [latestNews, setLatestNews] = useState<NewsItem | null>(null);
   const [status, setStatus] = useState<"connecting" | "live" | "reconnecting" | "error">("connecting");
   const [tickCount, setTickCount] = useState(0);
+  const [sentiment, setSentiment] = useState({ bullish_pct: 52, label: "Neutral" });
+  const [metrics, setMetrics] = useState({ total_volume: 0, volatility: "Low" });
 
   const activeSymbol = useMemo<Ticker>(() => "AAPL", []);
 
@@ -73,6 +75,8 @@ export default function Dashboard() {
           const data = await marketRes.json();
           setTickers(data.prices || data.tickers || DEFAULT_TICKERS);
           setTickCount(data.tick || 0);
+          if (data.sentiment) setSentiment(data.sentiment);
+          if (data.metrics) setMetrics(data.metrics);
         }
 
         if (agentsRes.ok) {
@@ -102,6 +106,12 @@ export default function Dashboard() {
               setPreviousTickers(prev);
               return { ...prev, ...payload.data };
             });
+            if (payload.sentiment) {
+              setSentiment(payload.sentiment);
+            }
+            if (payload.metrics) {
+              setMetrics(payload.metrics);
+            }
           }
           if (payload.type === "news") {
             setLatestNews(payload.data);
@@ -158,7 +168,7 @@ export default function Dashboard() {
         {/* Left Column: Market Watch */}
         <section className="flex flex-col gap-6 overflow-y-auto pr-2">
           <div className="glass-panel h-full rounded-[2.5rem] p-6 shadow-indigo-500/5">
-            <MarketPulse tickers={tickers} previous={previousTickers} status={status} />
+            <MarketPulse tickers={tickers} previous={previousTickers} status={status} sentiment={sentiment} />
           </div>
         </section>
 
@@ -185,11 +195,11 @@ export default function Dashboard() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <p className="text-[10px] text-white/30 uppercase mb-1">Total Volume</p>
-                <p className="text-xl font-mono text-white">124.52</p>
+                <p className="text-xl font-mono text-white">{metrics.total_volume}</p>
               </div>
               <div>
                 <p className="text-[10px] text-white/30 uppercase mb-1">Volatility</p>
-                <p className="text-xl font-mono text-accent">Low</p>
+                <p className="text-xl font-mono text-accent">{metrics.volatility}</p>
               </div>
             </div>
           </div>

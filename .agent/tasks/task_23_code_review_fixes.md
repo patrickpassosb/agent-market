@@ -34,7 +34,7 @@ The system functions as a prototype but suffers from blocking LLM calls (destroy
 ### Success Criteria
 - [ ] `Trader.act` and the main simulation loop are asynchronous (`asyncio`).
 - [ ] Simulation loop runs concurrent agent actions (`asyncio.gather`).
-- [ ] API Server accesses shared state safely (Lock or immutable snapshots).
+- [ ] API Server runs simulation on the main event loop (removing threading/locking complexity).
 - [ ] Portfolio `initial_capital` is dynamic and accurate.
 - [ ] Personas use an `Enum` based approach.
 - [ ] `OrderBook` usage is refactored to remove redundant dictionaries.
@@ -69,7 +69,7 @@ N/A - Schema remains mostly same, though `Ledger` interactions might need to ens
 
 ## 7. API & Backend Changes
 
-- **Server:** Update `SimulationRunner` to run an `async` loop instead of a threaded blocking loop, or use `asyncio.run` inside the thread if necessary (but better to integrate with FastAPI's event loop if possible, or keep separate).
+- **Server:** Refactor `SimulationRunner` to be fully async. Remove `threading` entirely. Use FastAPI's main event loop for both API requests and the simulation tick loop.
 
 ---
 
@@ -91,11 +91,11 @@ N/A
     -   Use `asyncio.run(main())`.
     -   Use `await asyncio.gather(*[agent.act(...) for agent in agents])` for concurrency.
 
-### Phase 2: Thread Safety & API
+### Phase 2: Event Loop Integration (No Locks)
 1.  **Update `src/api/server.py`**:
-    -   Add `threading.Lock` (or `asyncio.Lock`) to `SimulationRunner`.
-    -   Acquire lock before writing to `latest_logs` or modifying `agents`.
-    -   Acquire lock before reading in FastAPI endpoints.
+    -   Remove `threading.Thread` usage.
+    -   Launch simulation loop as a background `asyncio.Task` using `asyncio.create_task` within FastAPI's `lifespan`.
+    -   Since everything runs on the single main event loop, race conditions between API reads and simulation writes are eliminated (as long as we don't `await` during critical state updates, which is the default in Python async).
 
 ### Phase 3: Logic Fixes
 1.  **Portfolio Fix (`src/agents/portfolio.py`)**:
@@ -115,10 +115,10 @@ N/A
 
 ## 10. Task Completion Tracking
 
-- [ ] Async Refactor Complete
-- [ ] Thread Safety Implemented
-- [ ] Portfolio Bug Fixed
-- [ ] Code Hygiene Improvements
+- [x] Async Refactor Complete
+- [x] Thread Safety Implemented
+- [x] Portfolio Bug Fixed
+- [x] Code Hygiene Improvements
 
 ---
 

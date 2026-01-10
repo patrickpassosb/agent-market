@@ -9,21 +9,38 @@ which is necessary for liquidity and price discovery.
 from __future__ import annotations
 
 import os
+from enum import Enum
 
-PERSONAS = [
-    "A conservative long-term investor who only buys when prices are historically low and holds for long periods.",
-    "A high-frequency momentum trader who buys when prices are rising and sells quickly when they dip.",
-    "A panic seller who gets anxious when prices drop even slightly and sells immediately to cut losses.",
-    "A patient value investor who calculates intrinsic value and buys undervalued assets, ignoring short-term noise.",
-    "A contrarian who always bets against the current market trend; selling when everyone buys and buying when everyone sells.",
-    "A FOMO (Fear Of Missing Out) buyer who jumps in whenever they see a price spike, regardless of fundamentals.",
-    "A disciplined algorithmic trader who follows strict rules: buy at X% drop, sell at Y% gain.",
-    "A skittish day trader who makes many small trades but exits positions at the end of every day.",
-    "A whale who accumulates massive quantities slowly to not disturb the price, then holds.",
-    "A market maker who tries to profit from the spread, placing both buy and sell orders around the current price.",
-    "A rumor monger who trades based on 'news' (random fluctuations) rather than price trends.",
-    "A DCA (Dollar Cost Average) buyer who buys a fixed amount every tick regardless of price."
-]
+class PersonaStrategy(Enum):
+    CONSERVATIVE = "conservative"
+    MOMENTUM = "momentum"
+    PANIC = "panic"
+    VALUE = "value"
+    CONTRARIAN = "contrarian"
+    FOMO = "fomo"
+    ALGORITHMIC = "algorithmic"
+    DAY_TRADER = "day_trader"
+    WHALE = "whale"
+    MARKET_MAKER = "market_maker"
+    RUMOR_MONGER = "rumor_monger"
+    DCA = "dca"
+
+PERSONA_MAP = {
+    PersonaStrategy.CONSERVATIVE: "A conservative long-term investor who only buys when prices are historically low and holds for long periods.",
+    PersonaStrategy.MOMENTUM: "A high-frequency momentum trader who buys when prices are rising and sells quickly when they dip.",
+    PersonaStrategy.PANIC: "A panic seller who gets anxious when prices drop even slightly and sells immediately to cut losses.",
+    PersonaStrategy.VALUE: "A patient value investor who calculates intrinsic value and buys undervalued assets, ignoring short-term noise.",
+    PersonaStrategy.CONTRARIAN: "A contrarian who always bets against the current market trend; selling when everyone buys and buying when everyone sells.",
+    PersonaStrategy.FOMO: "A FOMO (Fear Of Missing Out) buyer who jumps in whenever they see a price spike, regardless of fundamentals.",
+    PersonaStrategy.ALGORITHMIC: "A disciplined algorithmic trader who follows strict rules: buy at X% drop, sell at Y% gain.",
+    PersonaStrategy.DAY_TRADER: "A skittish day trader who makes many small trades but exits positions at the end of every day.",
+    PersonaStrategy.WHALE: "A whale who accumulates massive quantities slowly to not disturb the price, then holds.",
+    PersonaStrategy.MARKET_MAKER: "A market maker who tries to profit from the spread, placing both buy and sell orders around the current price.",
+    PersonaStrategy.RUMOR_MONGER: "A rumor monger who trades based on 'news' (random fluctuations) rather than price trends.",
+    PersonaStrategy.DCA: "A DCA (Dollar Cost Average) buyer who buys a fixed amount every tick regardless of price."
+}
+
+PERSONAS = list(PERSONA_MAP.values())
 
 # Keywords used to map text personas to tiers.
 STRATEGIC_KEYWORDS = ["whale", "market maker"]
@@ -32,8 +49,16 @@ RULE_BASED_KEYWORDS = ["algorithmic", "disciplined", "contrarian"]
 
 PROVIDER_ORDER = os.getenv(
     "MODEL_PROVIDER_ORDER",
-    "ollama,openrouter,groq,gemini",
+    "cerebras,groq,gemini,openrouter,ollama",
 ).split(",")
+
+# Cerebras models use the cerebras/ prefix per LiteLLM docs (Context7 /berriai/litellm).
+CEREBRAS_MODELS = {
+    "strategic": "cerebras/llama3.1-70b",
+    "analytical": "cerebras/llama3.1-70b",
+    "rule": "cerebras/llama3.1-8b",
+    "fast": "cerebras/llama3.1-8b",
+}
 
 # OpenRouter uses OPENROUTER_API_KEY and optional OPENROUTER_API_BASE/OR_* envs.
 # https://github.com/berriai/litellm/blob/main/docs/my-website/docs/providers/openrouter.md (Context7 /berriai/litellm)
@@ -53,10 +78,10 @@ GROQ_MODELS = {
 
 # Gemini models use the gemini/ prefix per LiteLLM docs (Context7 /websites/litellm_ai).
 GEMINI_MODELS = {
-    "strategic": "gemini/gemini-2.5-flash",
-    "analytical": "gemini/gemini-2.5-flash",
-    "rule": "gemini/gemini-2.5-flash",
-    "fast": "gemini/gemini-2.5-flash",
+    "strategic": "gemini/gemini-1.5-flash", # Upgraded to Pro for strategy
+    "analytical": "gemini/gemini-1.5-flash",
+    "rule": "gemini/gemini-1.5-flash",
+    "fast": "gemini/gemini-1.5-flash",
 }
 
 def _ollama_enabled() -> bool:
@@ -88,7 +113,9 @@ def _available_models(tier: str) -> list[str]:
     models: list[str] = []
     for provider in PROVIDER_ORDER:
         provider = provider.strip()
-        if provider == "ollama" and _ollama_enabled():
+        if provider == "cerebras" and os.getenv("CEREBRAS_API_KEY"):
+            models.append(CEREBRAS_MODELS[tier])
+        elif provider == "ollama" and _ollama_enabled():
             models.append(OLLAMA_MODELS[tier])
         elif provider == "openrouter":
             model = OPENROUTER_MODELS.get(tier) or OPENROUTER_MODELS.get("fast")

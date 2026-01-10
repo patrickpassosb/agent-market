@@ -45,16 +45,22 @@ class Ledger:
         """
         def ensure_column(cursor, table: str):
             """Add run_id column to a table if it exists and lacks it."""
+            # Use fixed table names from a whitelist to be absolutely sure
+            if table not in ["transaction", "interactionlog"]:
+                return
+
             cursor.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
                 (table,),
             )
             if cursor.fetchone() is None:
                 return
-            cursor.execute(f'PRAGMA table_info("{table}")')
+            
+            # PRAGMA doesn't support parameters, so we use the whitelisted 'table' variable
+            cursor.execute(f"PRAGMA table_info({table})")
             columns = {row[1] for row in cursor.fetchall()}
             if "run_id" not in columns:
-                cursor.execute(f'ALTER TABLE "{table}" ADD COLUMN run_id TEXT')
+                cursor.execute(f"ALTER TABLE {table} ADD COLUMN run_id TEXT")
 
         try:
             with sqlite3.connect(db_path) as conn:  # https://github.com/python/cpython/blob/main/Doc/library/sqlite3.rst (Context7 /python/cpython)

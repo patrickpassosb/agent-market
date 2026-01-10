@@ -37,7 +37,7 @@ class BaseAgent(ABC):
         self.portfolio = Portfolio()
 
     @abstractmethod
-    def act(self, market_state: MarketState) -> Optional[dict]:
+    async def act(self, market_state: MarketState) -> Optional[dict]:
         """
         The core decision-making method.
         

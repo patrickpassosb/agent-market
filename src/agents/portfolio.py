@@ -22,6 +22,7 @@ class Portfolio(BaseModel):
     model_config = ConfigDict()  # Pydantic v2 config style per https://github.com/pydantic/pydantic/blob/main/docs/concepts/config.md (Context7 /pydantic/pydantic)
 
     cash: float = Field(default=1.5, description="Available cash balance (BTC)")
+    initial_capital: float = Field(default=1.5, description="The starting value of the portfolio for ROI tracking.")
     positions: Dict[str, int] = Field(default_factory=dict, description="Holdings: {item: quantity}")
     realized_pnl: float = Field(default=0.0, description="Locked-in profit/loss from closed positions")
     trades_count: int = Field(default=0, description="Total number of trades executed")
@@ -122,7 +123,6 @@ class Portfolio(BaseModel):
         Return performance metrics for analytics.
         """
         total_pnl = self.get_total_pnl(current_prices)
-        initial_capital = 1.5  # BTC
         
         return {
             "cash": self.cash,
@@ -130,8 +130,11 @@ class Portfolio(BaseModel):
             "realized_pnl": self.realized_pnl,
             "unrealized_pnl": self.get_unrealized_pnl(current_prices),
             "total_pnl": total_pnl,
+            "pnl": total_pnl,  # Alias for frontend
             "portfolio_value": self.get_portfolio_value(current_prices),
-            "roi": (total_pnl / initial_capital) * 100 if initial_capital > 0 else 0.0,
+            "total_value": self.get_portfolio_value(current_prices),  # Alias for frontend
+            "roi": (total_pnl / self.initial_capital) * 100 if self.initial_capital > 0 else 0.0,
+            "pnl_percent": (total_pnl / self.initial_capital) * 100 if self.initial_capital > 0 else 0.0,  # Alias for frontend
             "trades_count": self.trades_count
         }
 

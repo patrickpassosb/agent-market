@@ -30,7 +30,7 @@ def test_process_action_rejects_invalid_price(temp_db, price):
 
     assert result is None
     # Access the specific order book for AAPL
-    summary = engine.order_books["AAPL"].get_summary()
+    summary = engine.order_book.get_summary("AAPL")
     assert summary["bids_count"] == 0
     assert summary["asks_count"] == 0
 
@@ -43,6 +43,6 @@ def test_process_action_rejects_empty_item(temp_db):
 
     assert result is None
     # Check any order book (e.g. AAPL) to ensure it's empty
-    summary = engine.order_books["AAPL"].get_summary()
+    summary = engine.order_book.get_summary("AAPL")
     assert summary["bids_count"] == 0
     assert summary["asks_count"] == 0
