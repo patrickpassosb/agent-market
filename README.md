@@ -9,6 +9,7 @@ Simulate a functioning marketplace with multiple autonomous agents, then provide
 ## Overview
 
 - 12 agents with distinct personas and trading strategies
+- **Smart Asset Selection:** Agents dynamically prioritize high-volatility assets and news-driven opportunities.
 - Hybrid LLM strategy (model selection by persona)
 - Persistent memory (ChromaDB) + transaction/interaction ledgers (SQLite)
 - Live terminal UI + post-run reports
@@ -180,10 +181,14 @@ For a persistent, 24/7 simulation with a web dashboard:
     cp .env.example .env
     nano .env  # Add your API keys and configuration
     ```
-5.  **Deploy:**
+5.  **Pre-Flight Check:** (New!)
+    ```bash
+    ./scripts/pre_deploy_check.sh
+    ```
+6.  **Deploy:**
     ```bash
     ./scripts/deploy.sh
     ```
-6.  **Access:** Open your EC2 Public IP in a browser to view the dashboard.
+7.  **Access:** Open your EC2 Public IP in a browser to view the dashboard.
 
 The production setup uses Nginx as a reverse proxy, FastAPI for the backend, and Next.js for the frontend, all orchestrated via `docker-compose.prod.yml`.

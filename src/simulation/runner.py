@@ -43,7 +43,7 @@ class SimulationRunner:
         self.journalist = JournalistAgent()
         
         # Spawn Agents using Enum-based personas (matching other agent's work)
-        num_agents = 20
+        num_agents = 12
         available_strategies = list(PersonaStrategy)
         # Handle cases where num_agents > available_strategies by sampling with replacement if needed
         # But here we have 12 strategies, so let's just use all 12 and then double up some

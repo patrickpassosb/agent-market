@@ -1,4 +1,5 @@
 "use client";
+// Context7 (Next.js "use client" directive): https://github.com/vercel/next.js/blob/canary/docs/01-app/03-api-reference/01-directives/use-client.mdx
 
 import { ArrowTrendingUpIcon, ArrowTrendingDownIcon } from "@heroicons/react/20/solid";
 
@@ -6,13 +7,11 @@ type MarketPulseProps = {
     tickers: Record<string, number>;
     previous: Record<string, number>;
     status: string;
-    sentiment: {
-        bullish_pct: number;
-        label: string;
-    };
+    activeSymbol: string;
+    onSelectSymbol?: (symbol: string) => void;
 };
 
-export default function MarketPulse({ tickers, previous, status, sentiment }: MarketPulseProps) {
+export default function MarketPulse({ tickers, previous, status, activeSymbol, onSelectSymbol }: MarketPulseProps) {
     const assets = Object.keys(tickers);
 
     return (
@@ -37,8 +36,17 @@ export default function MarketPulse({ tickers, previous, status, sentiment }: Ma
                     const diff = price - prev;
                     const isUp = diff >= 0;
 
+                    const isActive = symbol === activeSymbol;
                     return (
-                        <div key={symbol} className="glass-panel group flex items-center justify-between rounded-2xl p-4 transition-all hover:bg-white/[0.08]">
+                        <button
+                            key={symbol}
+                            type="button"
+                            onClick={() => onSelectSymbol?.(symbol)}
+                            aria-pressed={isActive}
+                            className={`glass-panel group flex w-full items-center justify-between rounded-2xl p-4 text-left transition-all hover:bg-white/[0.08] ${
+                                isActive ? "ring-1 ring-secondary/50 bg-white/[0.06]" : ""
+                            }`}
+                        >
                             <div className="flex items-center gap-4">
                                 <div className={`flex h-10 w-10 items-center justify-center rounded-xl font-bold ${isUp ? 'bg-primary/10 text-primary' : 'bg-accent/10 text-accent'
                                     }`}>
@@ -60,21 +68,11 @@ export default function MarketPulse({ tickers, previous, status, sentiment }: Ma
                                     {Math.abs(diff).toFixed(6)}
                                 </div>
                             </div>
-                        </div>
+                        </button>
                     );
                 })}
             </div>
 
-            <div className="mt-4 rounded-2xl bg-gradient-to-br from-secondary/20 to-primary/10 p-4 border border-white/5">
-                <p className="text-[10px] uppercase tracking-widest text-white/40">Market Sentiment</p>
-                <div className="mt-2 flex items-end justify-between">
-                    <p className="text-xl font-display font-bold text-white">{sentiment.label}</p>
-                    <p className="text-xs text-primary font-medium">{sentiment.bullish_pct}% Bullish</p>
-                </div>
-                <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-white/5">
-                    <div className="h-full bg-primary transition-all duration-500" style={{ width: `${sentiment.bullish_pct}%` }} />
-                </div>
-            </div>
         </div>
     );
 }

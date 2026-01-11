@@ -177,6 +177,15 @@ Low risk; provider routing only.
 
 ---
 
+## Investigation Notes
+
+### 2026-01-11
+- `MODEL_PROVIDER_ORDER` is defined twice in `.env`; the last occurrence sets it to `ollama`, overriding earlier provider lists.
+- `_ollama_enabled()` returns true if any `OLLAMA_MODEL_*` variable is set, even when `OLLAMA_ENABLED=0`.
+- Result: provider selection will favor Ollama and can exclude API-backed providers.
+
+---
+
 **🎯 Ready to Plan Your Next Project?**
 
 This template gives you the framework - now fill it out with your specific project details!

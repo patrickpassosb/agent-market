@@ -113,6 +113,8 @@ None (reusing existing endpoints).
 - [x] Build AgentRoster
 - [x] Build RealtimeChart
 - [x] Build SentimentFeed
+- [x] Split Market Sentiment and Performance Metrics into separate boxes
+- [x] Add asset selector to switch Market Activity chart
 - [x] Polish & Verify
 
 ---

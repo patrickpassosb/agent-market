@@ -64,7 +64,8 @@ class JournalistAgent:
         api_key (str): API key for the model provider.
     """
 
-    def __init__(self, model_name: str = "gemini/gemini-2.5-flash"):
+    # https://docs.litellm.ai/docs/providers/gemini (Gemini 2.5 Flash preview identifiers)
+    def __init__(self, model_name: str = "gemini/gemini-2.5-flash-preview-09-2025"):
         """Initialize the journalist with a specific model identifier."""
         # Gemini models use the gemini/ prefix per LiteLLM docs (Context7 /websites/litellm_ai).
         self.model_name = model_name

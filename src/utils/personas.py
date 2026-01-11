@@ -61,6 +61,14 @@ CEREBRAS_MODELS = {
     "fast": "cerebras/llama3.1-8b",
 }
 
+# SambaNova models use the sambanova/ prefix per LiteLLM docs (Context7 /berriai/litellm).
+SAMBANOVA_MODELS = {
+    "strategic": "sambanova/llama3-70b",
+    "analytical": "sambanova/llama3-70b",
+    "rule": "sambanova/llama3-8b",
+    "fast": "sambanova/llama3-8b",
+}
+
 # OpenRouter uses OPENROUTER_API_KEY and optional OPENROUTER_API_BASE/OR_* envs.
 # https://github.com/berriai/litellm/blob/main/docs/my-website/docs/providers/openrouter.md (Context7 /berriai/litellm)
 OPENROUTER_MODELS = {
@@ -78,11 +86,12 @@ GROQ_MODELS = {
 }
 
 # Gemini models use the gemini/ prefix per LiteLLM docs (Context7 /websites/litellm_ai).
+# https://docs.litellm.ai/docs/providers/gemini (Gemini 2.5 Flash preview identifiers)
 GEMINI_MODELS = {
-    "strategic": "gemini/gemini-1.5-flash", # Upgraded to Pro for strategy
-    "analytical": "gemini/gemini-1.5-flash",
-    "rule": "gemini/gemini-1.5-flash",
-    "fast": "gemini/gemini-1.5-flash",
+    "strategic": "gemini/gemini-2.5-flash-preview-09-2025",
+    "analytical": "gemini/gemini-2.5-flash-preview-09-2025",
+    "rule": "gemini/gemini-2.5-flash-preview-09-2025",
+    "fast": "gemini/gemini-2.5-flash-preview-09-2025",
 }
 
 def _ollama_enabled() -> bool:
@@ -116,6 +125,8 @@ def _available_models(tier: str) -> list[str]:
         provider = provider.strip()
         if provider == "cerebras" and os.getenv("CEREBRAS_API_KEY"):
             models.append(CEREBRAS_MODELS[tier])
+        elif provider == "sambanova" and os.getenv("SAMBANOVA_API_KEY"):
+            models.append(SAMBANOVA_MODELS[tier])
         elif provider == "ollama" and _ollama_enabled():
             models.append(OLLAMA_MODELS[tier])
         elif provider == "openrouter":

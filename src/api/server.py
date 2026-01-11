@@ -113,6 +113,8 @@ class ConnectionManager:
     async def broadcast(self, message: dict):
         for connection in list(self.active_connections):
             try:
+                # Context7 (FastAPI WebSockets): send_json supports structured payloads
+                # https://github.com/fastapi/fastapi/blob/master/docs/en/docs/advanced/websockets.md
                 await connection.send_json(message)
             except Exception:
                 self.disconnect(connection)
@@ -125,9 +127,13 @@ async def broadcast_loop():
     last_news_tick = -1
     while True:
         if sim.running and sim.engine:
+            sentiment = sim.engine.get_global_sentiment()
+            metrics = sim.engine.get_market_metrics()
             await manager.broadcast({
                 "type": "ticker",
                 "data": dict(sim.engine.current_prices),
+                "sentiment": sentiment,
+                "metrics": metrics,
             })
             
             if sim.latest_news and sim.latest_news.get("tick", 0) > last_news_tick:
@@ -155,7 +161,9 @@ def get_state():
         "tickers": sim.engine.current_prices,
         "assets": SUPPORTED_ASSETS,
         "quote_currency": QUOTE_CURRENCY,
-        "tick": sim.tick_count
+        "tick": sim.tick_count,
+        "sentiment": sim.engine.get_global_sentiment(),
+        "metrics": sim.engine.get_market_metrics(),
     }
 
 @app.get("/agents", dependencies=[Depends(get_api_key)])

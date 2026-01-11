@@ -1,4 +1,5 @@
 "use client";
+// Context7 (Next.js "use client" directive): https://github.com/vercel/next.js/blob/canary/docs/01-app/03-api-reference/01-directives/use-client.mdx
 
 import { useEffect, useMemo, useState } from "react";
 import MarketPulse from "./MarketPulse";
@@ -42,6 +43,11 @@ const DEFAULT_TICKERS: TickerMap = {
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8000/ws";
+const API_KEY = process.env.NEXT_PUBLIC_API_KEY; // Context7: https://github.com/vercel/next.js/blob/canary/docs/01-app/02-guides/environment-variables.mdx
+const API_HEADERS = API_KEY ? { "X-API-Key": API_KEY } : undefined;
+const WS_URL_WITH_TOKEN = API_KEY
+  ? `${WS_URL}${WS_URL.includes("?") ? "&" : "?"}token=${encodeURIComponent(API_KEY)}`
+  : WS_URL;
 
 export default function Dashboard() {
   const [tickers, setTickers] = useState<TickerMap>(DEFAULT_TICKERS);
@@ -53,7 +59,7 @@ export default function Dashboard() {
   const [sentiment, setSentiment] = useState({ bullish_pct: 52, label: "Neutral" });
   const [metrics, setMetrics] = useState({ total_volume: 0, volatility: "Low" });
 
-  const activeSymbol = useMemo<Ticker>(() => "AAPL", []);
+  const [activeSymbol, setActiveSymbol] = useState<Ticker>("AAPL");
 
   const latestChartPoint = useMemo(() => {
     if (tickers[activeSymbol] === 0) return null;
@@ -67,8 +73,8 @@ export default function Dashboard() {
     const fetchData = async () => {
       try {
         const [marketRes, agentsRes] = await Promise.all([
-          fetch(`${API_BASE}/market/state`),
-          fetch(`${API_BASE}/agents`)
+          fetch(`${API_BASE}/state`, { headers: API_HEADERS }),
+          fetch(`${API_BASE}/agents`, { headers: API_HEADERS })
         ]);
 
         if (marketRes.ok) {
@@ -95,7 +101,7 @@ export default function Dashboard() {
 
     const connect = () => {
       setStatus("connecting");
-      socket = new WebSocket(WS_URL);
+      socket = new WebSocket(WS_URL_WITH_TOKEN);
 
       socket.onopen = () => setStatus("live");
       socket.onmessage = (event) => {
@@ -166,28 +172,27 @@ export default function Dashboard() {
 
       <main className="grid flex-1 gap-6 p-6 lg:grid-cols-[300px_1fr_350px]">
         {/* Left Column: Market Watch */}
-        <section className="flex flex-col gap-6 overflow-y-auto pr-2">
-          <div className="glass-panel h-full rounded-[2.5rem] p-6 shadow-indigo-500/5">
-            <MarketPulse tickers={tickers} previous={previousTickers} status={status} sentiment={sentiment} />
+        <section className="flex flex-col gap-6 pr-2">
+          <div className="glass-panel rounded-[2.5rem] p-6 shadow-indigo-500/5">
+            <MarketPulse
+              tickers={tickers}
+              previous={previousTickers}
+              status={status}
+              activeSymbol={activeSymbol}
+              onSelectSymbol={(symbol) => setActiveSymbol(symbol as Ticker)}
+            />
           </div>
-        </section>
-
-        {/* Center Column: Chart & Agents */}
-        <section className="flex flex-col gap-6">
-          <div className="glass-panel flex-1 rounded-[2.5rem] p-8">
-            <RealtimeChart latestPoint={latestChartPoint} symbol={activeSymbol} />
+          <div className="glass-panel rounded-[2.5rem] p-6 bg-gradient-to-br from-secondary/20 to-primary/10">
+            <p className="text-[10px] uppercase tracking-widest text-white/40">Market Sentiment</p>
+            <div className="mt-2 flex items-end justify-between">
+              <p className="text-xl font-display font-bold text-white">{sentiment.label}</p>
+              <p className="text-xs text-primary font-medium">{sentiment.bullish_pct}% Bullish</p>
+            </div>
+            <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-white/5">
+              <div className="h-full bg-primary transition-all duration-500" style={{ width: `${sentiment.bullish_pct}%` }} />
+            </div>
           </div>
-          <div className="glass-panel max-h-[400px] rounded-[2.5rem] p-8 overflow-y-auto">
-            <AgentRoster agents={agents} />
-          </div>
-        </section>
-
-        {/* Right Column: Feed & Stats */}
-        <section className="flex flex-col gap-6">
-          <div className="glass-panel flex-1 rounded-[2.5rem] p-8 overflow-y-auto">
-            <SentimentFeed latestNews={latestNews} />
-          </div>
-          <div className="glass-panel rounded-[2.5rem] p-8 bg-gradient-to-br from-primary/5 to-transparent">
+          <div className="glass-panel rounded-[2.5rem] p-6 bg-gradient-to-br from-primary/5 to-transparent">
             <div className="flex items-center gap-2 mb-4">
               <CpuChipIcon className="h-5 w-5 text-primary" />
               <p className="text-xs font-bold uppercase tracking-widest text-primary/70">Performance Metrics</p>
@@ -202,6 +207,23 @@ export default function Dashboard() {
                 <p className="text-xl font-mono text-accent">{metrics.volatility}</p>
               </div>
             </div>
+          </div>
+        </section>
+
+        {/* Center Column: Chart & Agents */}
+        <section className="flex flex-col gap-6">
+          <div className="glass-panel flex-1 rounded-[2.5rem] p-8">
+            <RealtimeChart key={activeSymbol} latestPoint={latestChartPoint} symbol={activeSymbol} />
+          </div>
+          <div className="glass-panel max-h-[400px] rounded-[2.5rem] p-8 overflow-y-auto">
+            <AgentRoster agents={agents} />
+          </div>
+        </section>
+
+        {/* Right Column: Feed */}
+        <section className="flex flex-col gap-6">
+          <div className="glass-panel flex-1 rounded-[2.5rem] p-8 overflow-y-auto">
+            <SentimentFeed latestNews={latestNews} />
           </div>
         </section>
       </main>

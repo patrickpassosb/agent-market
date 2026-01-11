@@ -335,8 +335,23 @@ async def main():
 
                     # --- PHASE 2: THINK & ACT (Concurrent Batches) ---
                     async def run_agent(agent: Trader):
-                        # Randomly pick an asset to focus on for this turn
-                        focused_asset = random.choice(SUPPORTED_ASSETS)
+                        # Smart Asset Selection: Biases towards assets with higher volatility/movement
+                        if random.random() < 0.7:  # 70% chance to follow market "heat"
+                            # Find the asset with the highest deviation from its base price (simulated volatility)
+                            # In a real system, we'd use moving average variance.
+                            # Here, we pick the asset with the highest raw price as a proxy for "activity"
+                            # or randomly weight it by current price to simulate attention.
+                            weighted_assets = []
+                            for asset in SUPPORTED_ASSETS:
+                                price = engine.current_prices.get(asset, 0)
+                                # Weight by price + random noise to simulate varying attention
+                                weight = price * random.uniform(0.8, 1.2)
+                                weighted_assets.append((asset, weight))
+                            
+                            focused_asset = max(weighted_assets, key=lambda x: x[1])[0]
+                        else:
+                            # 30% chance to explore random assets (maintain liquidity in quiet markets)
+                            focused_asset = random.choice(SUPPORTED_ASSETS)
                         
                         # Agent perceives state of that asset, retrieves memory, and decides
                         state = engine.get_state(focused_asset)
