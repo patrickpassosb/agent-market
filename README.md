@@ -118,13 +118,6 @@ Use `scripts/run_all.sh` to simultaneously launch both backend (`uvicorn`) and f
 - `TECHNICAL_DOCS.md`: Expanded architecture, CI/CD, persistence, and scaling notes.
 - `AGENTS.md`: Workflow & documentation rules for this repo.
 
-## References & Context
-
-- Challenge requirements: [`context/multi-agent-marketplace-simulation.md`](context/multi-agent-marketplace-simulation.md).
-- Evaluation guidelines: [`context/global-guidelines.md`](context/global-guidelines.md).
-- Extended architecture: [`TECHNICAL_DOCS.md`](TECHNICAL_DOCS.md).
-- Agent rules: [`AGENTS.md`](AGENTS.md).
-
 ## Tech Stack
 
 - Python 3.12, `uv`, `litellm`, `sqlmodel`, `rich`, `asyncio`.
