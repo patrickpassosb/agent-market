@@ -32,12 +32,25 @@ api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
 
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",")
 
-from src.market.schema import QUOTE_CURRENCY, SUPPORTED_ASSETS
+from src.market.schema import QUOTE_CURRENCY, SUPPORTED_ASSETS, Transaction
 from src.simulation.runner import SimulationRunner
 
 # --- Global State ---
 
 sim = SimulationRunner()
+
+
+def _transaction_to_dict(tx: Transaction | None) -> dict | None:
+    if not tx:
+        return None
+    return {
+        "item": tx.item,
+        "price": tx.price,
+        "timestamp": tx.timestamp.isoformat(),
+        "buyer_id": tx.buyer_id,
+        "seller_id": tx.seller_id,
+        "run_id": tx.run_id,
+    }
 
 # --- Security Dependency ---
 
@@ -157,11 +170,14 @@ async def broadcast_loop():
         if sim.running and sim.engine:
             sentiment = sim.engine.get_global_sentiment()
             metrics = sim.engine.get_market_metrics()
+            latest_tx = sim.engine.get_latest_transaction()
             await manager.broadcast({
                 "type": "ticker",
                 "data": dict(sim.engine.current_prices),
                 "sentiment": sentiment,
                 "metrics": metrics,
+                "tick": sim.tick_count,
+                "latest_transaction": _transaction_to_dict(latest_tx),
             })
             if sim.latest_news and sim.latest_news.get("tick", 0) > last_news_tick:
                 last_news_tick = sim.latest_news["tick"]
@@ -186,6 +202,11 @@ def get_state():
     """
     if not sim.engine:
         return {"error": "Simulation not ready"}
+    history_payload: list[dict] = []
+    for tx in reversed(sim.engine.get_recent_transactions(limit=200)):
+        payload = _transaction_to_dict(tx)
+        if payload:
+            history_payload.append(payload)
     return {
         "prices": sim.engine.current_prices,
         "tickers": sim.engine.current_prices,
@@ -194,6 +215,7 @@ def get_state():
         "tick": sim.tick_count,
         "sentiment": sim.engine.get_global_sentiment(),
         "metrics": sim.engine.get_market_metrics(),
+        "history": history_payload,
     }
 
 @app.get("/agents", dependencies=[Depends(get_api_key)])

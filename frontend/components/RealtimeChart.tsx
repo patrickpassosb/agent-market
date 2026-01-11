@@ -7,20 +7,19 @@ import {
   type IChartApi,
   type ISeriesApi,
   type LineData,
-  type UTCTimestamp,
   ColorType,
   CrosshairMode,
 } from "lightweight-charts";
 
 type RealtimeChartProps = {
-  latestPoint: LineData | null;
+  seriesData: LineData[];
   symbol: string;
 };
 
 /**
- * RealtimeChart instantiates a lightweight-charts AreaSeries and pipes in the latest ticker point.
+ * RealtimeChart instantiates a lightweight-charts AreaSeries and renders the provided series data.
  */
-export default function RealtimeChart({ latestPoint, symbol }: RealtimeChartProps) {
+export default function RealtimeChart({ seriesData, symbol }: RealtimeChartProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Area"> | null>(null);
@@ -97,12 +96,9 @@ export default function RealtimeChart({ latestPoint, symbol }: RealtimeChartProp
   }, []);
 
   useEffect(() => {
-    if (!latestPoint || !seriesRef.current) return;
-    seriesRef.current.update({
-      time: latestPoint.time as UTCTimestamp,
-      value: latestPoint.value,
-    });
-  }, [latestPoint]);
+    if (!seriesRef.current) return;
+    seriesRef.current.setData(seriesData);
+  }, [seriesData]);
 
   return (
     <div className="flex h-full flex-col gap-6">

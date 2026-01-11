@@ -2,17 +2,6 @@
 
 This repository implements the Multi-Agent Marketplace Simulation challenge by orchestrating a tick-based crypto/stock hybrid marketplace powered by autonomous LLM agents, persistent memories, and observable evidence artifacts.
 
-## Challenge & Purpose
-
-*Goal*: Create autonomous agents that trade, negotiate, and narrate within a reproducible market while satisfying the [multi-agent marketplace requirements](context/multi-agent-marketplace-simulation.md).
-
-Key deliverables:
-1. **10-20 distinct personas** (see `src/utils/personas.py`) racing to buy, sell, or provide liquidity.
-2. **Memory system** backed by ChromaDB (`src/memory/memory.py`) so agents retrieve and store rationale.
-3. **Complete transaction + interaction ledgers** (`src/market/ledger.py` + `src/analysis/report.py`) for auditability.
-4. **Evidence artifacts** (logs, checkpoints, reports, charts, frontend dashboard) to show emergent behavior.
-5. Observation of the **Global Guidelines** (`context/global-guidelines.md`): overview, architecture, how to run, and a demo guide reside in this README.
-
 ## System Overview
 
 - **Simulation Entry Point (`main.py`)**: Initializes the `MarketEngine`, invests agents with personas/models, and runs the main asyncio tick loop while streaming a Rich dashboard.
@@ -118,15 +107,6 @@ Use `scripts/run_all.sh` to simultaneously launch both backend (`uvicorn`) and f
 - Production Compose: `docker-compose.prod.yml` spins up backend, Next.js frontend, and Nginx reverse proxy with persistent volumes.
 - `Dockerfile`: builds the Python env with `uv sync`, installs dependencies from `uv.lock`, and runs `uv run main.py`.
 - Deployment Scripts: `scripts/pre_deploy_check.sh` validates env/keys, `scripts/deploy.sh` builds Docker images, `scripts/setup_ec2.sh`/`setup_gcp*.sh` bootstrap cloud VMs.
-
-## Challenge Compliance Checklist
-
-- ✅ **Distinct Personas**: 12 personas covering conservative, momentum, panic, value, contrarian, FOMO, algorithmic, whales, market makers, and rumor mongers.
-- ✅ **Vector Memory**: Each agent stores PNL reflections via `AgentMemory` (ChromaDB) and retrieves them before issuing decisions.
-- ✅ **Ledger/Transactions**: `Ledger` persists both trades (`Transaction`) and meta-actions (`InteractionLog`) tagged by `run_id`.
-- ✅ **Narrative Layer**: `JournalistAgent` transforms market state + recent transactions into expressive news-style updates consumed by the dashboard.
-- ✅ **No N8N**: The entire flow is implemented in Python (no external orchestration tooling).
-- ✅ **Experiment Evidence**: `reports/`, `plots/`, `logs/`, `checkpoints/`, and the Next.js dashboard provide demonstrable behavior.
 
 ## Directory Layout
 

@@ -59,8 +59,9 @@ class MarketEngine:
         self.price_history: dict[str, list[float]] = {
             asset: [float(initial_price)] for asset in SUPPORTED_ASSETS
         }
-        
+
         self.run_id = run_id
+        self.last_transaction: Transaction | None = None
 
     def get_global_sentiment(self) -> dict:
         """
@@ -195,6 +196,7 @@ class MarketEngine:
                 transaction.run_id = self.run_id
             # 1. Persist to DB
             self.ledger.record_transaction(transaction)
+            self.last_transaction = transaction
             
             # 2. Update Market State for this asset
             self.current_prices[item] = transaction.price
@@ -203,7 +205,13 @@ class MarketEngine:
             if len(self.price_history[item]) > 50:
                 self.price_history[item].pop(0)
             
-            return transaction
+        return transaction
+
+    def get_recent_transactions(self, limit: int = 100) -> list[Transaction]:
+        return self.ledger.get_transactions(limit=limit)
+
+    def get_latest_transaction(self) -> Transaction | None:
+        return self.last_transaction
         
         return None
 

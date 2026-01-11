@@ -1,7 +1,7 @@
 "use client";
 // Context7 (Next.js "use client" directive): https://github.com/vercel/next.js/blob/canary/docs/01-app/03-api-reference/01-directives/use-client.mdx
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import MarketPulse from "./MarketPulse";
 import RealtimeChart from "./RealtimeChart";
 import AgentRoster from "./AgentRoster";
@@ -21,6 +21,18 @@ import {
 
 type Ticker = "AAPL" | "TSLA" | "NVDA" | "MSFT";
 type TickerMap = Record<Ticker, number>;
+type ChartPoint = {
+  time: number;
+  value: number;
+};
+type TransactionHistoryRecord = {
+  item: Ticker;
+  price: number;
+  timestamp: string;
+  buyer_id?: string;
+  seller_id?: string;
+  run_id?: string;
+};
 
 type AgentRecord = {
   id: string;
@@ -55,6 +67,60 @@ const WS_URL_WITH_TOKEN = API_KEY
   ? `${WS_URL}${WS_URL.includes("?") ? "&" : "?"}token=${encodeURIComponent(API_KEY)}`
   : WS_URL;
 
+const HISTORY_LIMIT = 200;
+
+const createEmptyHistory = (basePrices: TickerMap): Record<Ticker, ChartPoint[]> => {
+  return TICKERS.reduce((acc, symbol) => {
+    const basePrice = basePrices[symbol] ?? 0;
+    acc[symbol] = basePrice > 0 ? [{ time: Math.floor(Date.now() / 1000), value: basePrice }] : [];
+    return acc;
+  }, {} as Record<Ticker, ChartPoint[]>);
+};
+
+const ensureAscending = (series: ChartPoint[]): ChartPoint[] => {
+  if (!series.length) return [];
+  const sorted = [...series].sort((a, b) => a.time - b.time);
+  const normalized: ChartPoint[] = [];
+  let lastTime = -Infinity;
+  for (const point of sorted) {
+    let time = point.time;
+    if (time <= lastTime) {
+      time = lastTime + 1;
+    }
+    normalized.push({ ...point, time });
+    lastTime = time;
+  }
+  return normalized;
+};
+
+const normalizeHistory = (records: TransactionHistoryRecord[], basePrices: TickerMap): Record<Ticker, ChartPoint[]> => {
+  const history = TICKERS.reduce((acc, symbol) => {
+    acc[symbol] = [];
+    return acc;
+  }, {} as Record<Ticker, ChartPoint[]>);
+
+  records.forEach((record) => {
+    if (!TICKERS.includes(record.item)) return;
+    const point: ChartPoint = {
+      time: Math.floor(new Date(record.timestamp).getTime() / 1000),
+      value: record.price,
+    };
+    history[record.item].push(point);
+  });
+
+  for (const symbol of TICKERS) {
+    if (!history[symbol].length && (basePrices[symbol] ?? 0) > 0) {
+      history[symbol].push({
+        time: Math.floor(Date.now() / 1000),
+        value: basePrices[symbol],
+      });
+    }
+    history[symbol] = ensureAscending(history[symbol]).slice(-HISTORY_LIMIT);
+  }
+
+  return history;
+};
+
 export default function Dashboard() {
   const [tickers, setTickers] = useState<TickerMap>(DEFAULT_TICKERS);
   const [previousTickers, setPreviousTickers] = useState<TickerMap>(DEFAULT_TICKERS);
@@ -65,15 +131,11 @@ export default function Dashboard() {
   const [sentiment, setSentiment] = useState({ bullish_pct: 52, label: "Neutral" });
   const [metrics, setMetrics] = useState({ total_volume: 0, volatility: "Low" });
 
+  const [priceHistory, setPriceHistory] = useState<Record<Ticker, ChartPoint[]>>(() => createEmptyHistory(DEFAULT_TICKERS));
+
   const [activeSymbol, setActiveSymbol] = useState<Ticker>("AAPL");
 
-  const latestChartPoint = useMemo(() => {
-    if (tickers[activeSymbol] === 0) return null;
-    return {
-      time: (Math.floor(Date.now() / 1000)) as any,
-      value: tickers[activeSymbol],
-    };
-  }, [tickers, activeSymbol]);
+  const activeSeries = priceHistory[activeSymbol] ?? [];
 
   useEffect(() => {
     // Initial HTTP poll to bootstrap market state + agent roster.
@@ -90,6 +152,8 @@ export default function Dashboard() {
           setTickCount(data.tick || 0);
           if (data.sentiment) setSentiment(data.sentiment);
           if (data.metrics) setMetrics(data.metrics);
+          const history = Array.isArray(data.history) ? data.history : [];
+          setPriceHistory(normalizeHistory(history, data.prices || DEFAULT_TICKERS));
         }
 
         if (agentsRes.ok) {
@@ -106,6 +170,28 @@ export default function Dashboard() {
     // Maintain a resilient WebSocket connection to stream live updates.
     let socket: WebSocket | null = null;
     let reconnectTimer: any;
+
+    const appendHistoryPoint = (record: TransactionHistoryRecord) => {
+      if (!record || !TICKERS.includes(record.item)) {
+        return;
+      }
+      const baseTime = Math.floor(new Date(record.timestamp).getTime() / 1000);
+      setPriceHistory((prev) => {
+        const next = { ...prev };
+        const series = next[record.item] ?? [];
+        const lastTime = series.length ? series[series.length - 1].time : -Infinity;
+        const point: ChartPoint = {
+          time: baseTime <= lastTime ? lastTime + 1 : baseTime,
+          value: record.price,
+        };
+        const updated = [...series, point];
+        if (updated.length > HISTORY_LIMIT) {
+          updated.shift();
+        }
+        next[record.item] = updated;
+        return next;
+      });
+    };
 
     const connect = () => {
       setStatus("connecting");
@@ -125,6 +211,12 @@ export default function Dashboard() {
             }
             if (payload.metrics) {
               setMetrics(payload.metrics);
+            }
+            if (typeof payload.tick === "number") {
+              setTickCount(payload.tick);
+            }
+            if (payload.latest_transaction) {
+              appendHistoryPoint(payload.latest_transaction);
             }
           }
           if (payload.type === "news") {
@@ -221,7 +313,7 @@ export default function Dashboard() {
         {/* Center Column: Chart & Main Agent Roster */}
         <section className="flex flex-col gap-6">
           <div className="glass-panel flex-1 rounded-[2.5rem] p-8">
-            <RealtimeChart key={activeSymbol} latestPoint={latestChartPoint} symbol={activeSymbol} />
+            <RealtimeChart key={activeSymbol} seriesData={activeSeries} symbol={activeSymbol} />
           </div>
           <div className="glass-panel max-h-[400px] rounded-[2.5rem] p-8 overflow-y-auto">
             <AgentRoster agents={agents} />
