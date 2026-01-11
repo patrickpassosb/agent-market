@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Provision a GCP Compute Engine VM and optionally bootstrap the agent-market repo remotely.
 # Context7 docs:
 # - https://github.com/googlecloudplatform/python-docs-samples/blob/main/endpoints/getting-started-grpc/README.md
 # - https://cloud.google.com/sdk/gcloud/reference/index

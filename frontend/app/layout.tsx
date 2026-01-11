@@ -6,6 +6,9 @@ export const metadata: Metadata = {
   description: "Real-time market simulation dashboard.",
 };
 
+/**
+ * The RootLayout defines global typography, metadata, and hydration-safe body settings.
+ */
 export default function RootLayout({
   children,
 }: Readonly<{

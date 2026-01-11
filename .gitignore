@@ -35,6 +35,9 @@ venv.bak/
 .env
 .env.*
 !.env.example
+credentials.json
+*.json.key
+service-account.json
 
 # IDEs
 .vscode/

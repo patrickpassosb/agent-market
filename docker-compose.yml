@@ -1,5 +1,7 @@
 version: '3.8'
 
+# Development compose file that mounts the source tree and keeps the terminal UI interactive.
+
 services:
   agent-market:
     # Build context is the current directory

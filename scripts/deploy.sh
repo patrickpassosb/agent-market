@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Deploy the agent-market Docker stack using the production compose file.
+
 echo ">>> Deploying Agent Market..."
 
 # 1. Pull latest code (if in a git repo)

@@ -10,6 +10,7 @@ The simulation leverages multiple inference providers to maximize throughput and
 - **Cerebras**: Integrated for ultra-high-throughput inference with Llama 3.1 models.
 - **SambaNova**: Utilized for record-breaking inference speeds and specialized high-performance workloads.
 - **OpenRouter**: Acts as a generalized fallback and aggregator for various open-source models (Mistral, etc.).
+- **Vertex AI**: Supplies Gemini 1.5 Flash/Pro via Google Cloud to diversify latency/reasoning tiers when `VERTEXAI_PROJECT` is configured.
 
 ### Hybrid Model Strategy
 
@@ -70,6 +71,13 @@ sequenceDiagram
         Main->>UI/WS: Update Dashboard/Broadcast
     end
 ```
+
+### API & Dashboard Observability
+
+- **SimulationRunner (`src/simulation/runner.py`)** spins up the `MarketEngine`, `Trader` agents, and `JournalistAgent` as a background task. It exposes `latest_logs`, `latest_news`, and serialized agent metadata used by the API server.
+- **FastAPI Server (`src/api/server.py`)** injects a lifespan hook that starts the `SimulationRunner`, then uses a background `broadcast_loop` to push ticker/news payloads over `/ws`. REST endpoints (`/state`, `/agents`) snapshot the latest in-memory metrics for the dashboard or automation.
+- **Frontend Dashboard (`frontend/`)**: The dashboard component polls `/state` and `/agents` once and then listens to `/ws` for delta updates. WebSocket tokens are validated via `X-API-Key`/`token` to respect the same credentials as the REST API.
+- This setup keeps the simulation, API, and UI on a single event loop in development (via `uv run uvicorn ...`) but scales nicely via Docker + nginx proxies in production.
 
 ### Async Orchestration
 

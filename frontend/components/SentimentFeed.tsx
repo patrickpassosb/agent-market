@@ -8,6 +8,9 @@ type NewsItem = {
     tick: number;
 };
 
+/**
+ * SentimentFeed surfaces the JournalistAgent headlines or a calming placeholder while waiting.
+ */
 export default function SentimentFeed({ latestNews }: { latestNews: NewsItem | null }) {
     return (
         <section className="flex flex-col gap-6">

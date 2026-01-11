@@ -1,20 +1,27 @@
 # Agent Market Simulation
 
-A multi-agent marketplace simulation where autonomous agents trade, negotiate, and adapt using LLM-driven strategies. Built for the Multi-Agent Marketplace Simulation Challenge to demonstrate autonomous agent behavior, observability, and reproducibility.
+This repository implements the Multi-Agent Marketplace Simulation challenge by orchestrating a tick-based crypto/stock hybrid marketplace powered by autonomous LLM agents, persistent memories, and observable evidence artifacts.
 
-## Purpose
+## Challenge & Purpose
 
-Simulate a functioning marketplace with multiple autonomous agents, then provide clear evidence of behavior (logs, reports, checkpoints) so evaluators can understand outcomes and system dynamics.
+*Goal*: Create autonomous agents that trade, negotiate, and narrate within a reproducible market while satisfying the [multi-agent marketplace requirements](context/multi-agent-marketplace-simulation.md).
 
-## Overview
+Key deliverables:
+1. **10-20 distinct personas** (see `src/utils/personas.py`) racing to buy, sell, or provide liquidity.
+2. **Memory system** backed by ChromaDB (`src/memory/memory.py`) so agents retrieve and store rationale.
+3. **Complete transaction + interaction ledgers** (`src/market/ledger.py` + `src/analysis/report.py`) for auditability.
+4. **Evidence artifacts** (logs, checkpoints, reports, charts, frontend dashboard) to show emergent behavior.
+5. Observation of the **Global Guidelines** (`context/global-guidelines.md`): overview, architecture, how to run, and a demo guide reside in this README.
 
-- 12 agents with distinct personas and trading strategies
-- **Smart Asset Selection:** Agents dynamically prioritize high-volatility assets and news-driven opportunities.
-- Hybrid LLM strategy (model selection by persona)
-- Persistent memory (ChromaDB) + transaction/interaction ledgers (SQLite)
-- Live terminal UI + post-run reports
+## System Overview
 
-## Architecture
+- **Simulation Entry Point (`main.py`)**: Initializes the `MarketEngine`, invests agents with personas/models, and runs the main asyncio tick loop while streaming a Rich dashboard.
+- **Market Engine (`src/market/engine.py`)**: Facade pattern that routes actions to the `OrderBook`, negotiates counter-offers, and persists transactions via the `Ledger`.
+- **Agents (`src/agents/`)**: `Trader` agents generate decisions through `litellm`, consult `AgentMemory`, and store reasoning; `JournalistAgent` converts market state into human-friendly headlines.
+- **Memory (`src/memory/memory.py`)**: Per-agent ChromaDB collection storing short textual memories for retrieval-augmented generation.
+- **API & Frontend (`src/api/server.py`, `frontend/`)**: FastAPI exposes REST/WebSocket endpoints while the Next.js dashboard polls `/state`, `/agents`, and streams `/ws`.
+- **Analysis (`src/analysis/`)**: Charts & reports transform ledger data into PNG evidence plus Markdown summaries for reviewers.
+- **Helpers (`src/utils/`)**: Rate limiting, checkpointing, persona/model routing, and prompt templates centralize shared behavior.
 
 ```mermaid
 flowchart LR
@@ -26,169 +33,121 @@ flowchart LR
     E --> G[AgentMemory]
     G --> H[ChromaDB]
     D --> I[SQLite market.db]
+    A --> J[JournalistAgent]
+    A --> K[analysis/report.py]
+    A --> L[frontend Dashboard]
 ```
 
-Core loop:
-1) Sense: agents receive MarketState
-2) Think: retrieve memories + query LLM
-3) Act: return structured decision
-4) Execute: match orders, update portfolios, persist logs
+Data Flow:
+1. Agents sense `MarketState` from `MarketEngine`.
+2. They retrieve memories, build prompts, run LLMs, and emit structured decisions via `litellm`.
+3. Engine negotiates, matches via `OrderBook`, updates `Ledger`, and recalculates prices.
+4. Transactions & interactions feed `JournalistAgent`, `reports/`, `charts`, and the frontend via the API/WebSocket.
 
 ## Quick Start
 
 ### Prerequisites
-- Python 3.12+
-- `uv` (recommended) or `pip`
 
-### Install
+- Python 3.12+
+- [`uv`](https://astral.sh/uv) (preferred) or `pip` for dependency management.
+- Node.js + npm (for the dashboard)
+- Optional: Docker (for reproducible stacks)
+
+### Clone & Install
+
 ```bash
 git clone https://github.com/your-username/agent-market.git
 cd agent-market
-uv sync
-# OR
-pip install -r requirements.txt
+uv sync           # installs Python dependencies in a locked virtualenv
+cd frontend && npm install
 ```
 
-### API Keys
-Copy `.env.example` to `.env` and add keys:
-- `GROQ_API_KEY`
-- `GEMINI_API_KEY`
-- `OPENAI_API_KEY` (optional; not used by default)
- - `OPENROUTER_API_KEY` and `OPENROUTER_MODEL_*` if using OpenRouter
+### Configuration
 
-### Run (Terminal UI)
+1. Copy the example env: `cp .env.example .env`.
+2. Fill in API keys (Groq, Gemini, OpenRouter, and configure Vertex AI via `VERTEXAI_PROJECT`/credentials if you want Google Cloud-native inference). The project uses provider rotation in `src/utils/personas.py`.
+3. Optional overrides:
+   - `MODEL_PROVIDER_ORDER`: controls fallback ordering (default: `cerebras,groq,gemini,openrouter,ollama`).
+   - `VERTEXAI_PROJECT` (and related Google Cloud credentials) to treat Vertex AI as an inference provider and route Gemini models through Google Cloud.
+   - `MARKET_DATABASE_PATH`, `CHROMA_DB_PATH`: persistence targets.
+
+### Running the Simulation (Terminal UI)
+
 ```bash
 uv run python main.py
 ```
 
-### Run (Web API & Dashboard)
-1. Start the API Server:
+Control the simulation with CLI flags:
+- `--max-ticks`: limit tick count for reproducible runs.
+- `--checkpoint-every`: write JSON snapshots to `checkpoints/`.
+- `--report-dir`: output location for Markdown/PDF evidence.
+
+### API Server + Dashboard
+
+1. **Start the API** (FastAPI + SimulationRunner):
    ```bash
    uv run uvicorn src.api.server:app --reload --port 8000
    ```
-2. Start the Frontend Dashboard (requires Node.js):
+2. **Dashboard** (Next.js):
    ```bash
    cd frontend
-   npm install
    npm run dev
    ```
-   Access the premium dashboard at `http://localhost:3000`.
+   Connects to `NEXT_PUBLIC_API_BASE`/`NEXT_PUBLIC_WS_URL` to stream market data.
 
-## Demo Guide
+Use `scripts/run_all.sh` to simultaneously launch both backend (`uvicorn`) and frontend (`npm run dev`) with environment bonding.
 
-Run a bounded simulation and generate evidence artifacts:
-```bash
-uv run python main.py --max-ticks 200 --checkpoint-every 20 --initial-price 100 --seed-inventory 1
-```
+## Evidence & Observability
 
-## Reports and Evidence
+- **Logs**: `logs/` contains Rich & agent traces (`main.py` and `SimulationRunner` logging).
+- **Ledger**: `market.db` (SQLite) captures `Transaction` and `InteractionLog` tables; `src/analysis/report.py` can export them to Markdown + PNG.
+- **Plots**: `src/analysis/chart.py` generates price & ROI graphs stored in `plots/` or inside report directories.
+- **Checkpoints**: Periodic JSON snapshots (`checkpoints/`) capture prices, agents, and recent actions for debugging the control loop.
+- **Reports**: Each run (e.g., `reports/<run_id>`) contains `report.md`, PNG charts, and `index.*` summaries.
+- **Dashboard**: Real-time WebSocket broadcast (`/ws`) and REST state endpoints expose the latest `tick`, `sentiment`, and `metrics`.
 
-Each run generates a report and index:
-- Per-run report: `reports/<run_id>/report.md`
-- Index: `reports/index.md`
+## Testing & Quality
 
-Other artifacts:
-- Logs: `logs/`
-- Plots: `plots/`
-- Checkpoints: `checkpoints/`
+- `uv run pytest tests/ -v`: verifies engine, order book, ledger, ports, models, and journaling logic.
+- The codebase uses `sqlmodel`, `pydantic`, and `litellm`, with docstring-backed inference models.
+- Automated report generation (`src/analysis/report.py`) ensures every run produces structured Markdown + JSON summaries.
 
-## Analysis
+## Docker & Production Deployment
 
-Generate post-run charts:
-```bash
-uv run python src/analysis/chart.py
-```
+- Development Compose: `docker-compose.yml` mounts the repository for iterative tinkering.
+- Production Compose: `docker-compose.prod.yml` spins up backend, Next.js frontend, and Nginx reverse proxy with persistent volumes.
+- `Dockerfile`: builds the Python env with `uv sync`, installs dependencies from `uv.lock`, and runs `uv run main.py`.
+- Deployment Scripts: `scripts/pre_deploy_check.sh` validates env/keys, `scripts/deploy.sh` builds Docker images, `scripts/setup_ec2.sh`/`setup_gcp*.sh` bootstrap cloud VMs.
 
-## Configuration
+## Challenge Compliance Checklist
 
-Common CLI flags:
-- `--max-ticks`: stop after N ticks
-- `--checkpoint-every`: write checkpoints every N ticks
-- `--initial-price`: seed price for the first tick
-- `--seed-inventory`: initial units assigned to each agent
-- `--no-report`: disable report generation
+- ✅ **Distinct Personas**: 12 personas covering conservative, momentum, panic, value, contrarian, FOMO, algorithmic, whales, market makers, and rumor mongers.
+- ✅ **Vector Memory**: Each agent stores PNL reflections via `AgentMemory` (ChromaDB) and retrieves them before issuing decisions.
+- ✅ **Ledger/Transactions**: `Ledger` persists both trades (`Transaction`) and meta-actions (`InteractionLog`) tagged by `run_id`.
+- ✅ **Narrative Layer**: `JournalistAgent` transforms market state + recent transactions into expressive news-style updates consumed by the dashboard.
+- ✅ **No N8N**: The entire flow is implemented in Python (no external orchestration tooling).
+- ✅ **Experiment Evidence**: `reports/`, `plots/`, `logs/`, `checkpoints/`, and the Next.js dashboard provide demonstrable behavior.
 
-### LLM Providers
+## Directory Layout
 
-This project rotates across providers to spread free-tier limits. Configure keys and model IDs in `.env`:
-- OpenRouter: `OPENROUTER_API_KEY` and `OPENROUTER_MODEL_*` (full `openrouter/<model>` IDs)
-- Groq: `GROQ_API_KEY`
-- Gemini: `GEMINI_API_KEY`
+- `src/`: Core Python services (agents, market, memory, API, prompts, utilities, analyses).
+- `frontend/`: Next.js dashboard (app router, components, Tailwind styling).
+- `scripts/`: Deployment, provisioning, and dev helpers (`deploy.sh`, `run_all.sh`, cloud setup scripts).
+- `reports/`, `plots/`, `logs/`, `checkpoints/`: Evidence artifacts created at runtime.
+- `context/`: Challenge-specific requirements & evaluation guidelines (`global-guidelines.md`, `multi-agent-marketplace-simulation.md`).
+- `TECHNICAL_DOCS.md`: Expanded architecture, CI/CD, persistence, and scaling notes.
+- `AGENTS.md`: Workflow & documentation rules for this repo.
 
-Provider order is controlled by `MODEL_PROVIDER_ORDER` (e.g., `openrouter,groq,gemini`).
-OpenAI is intentionally disabled by default; keep `OPENAI_API_KEY` only if you want to re-enable it later.
+## References & Context
 
-Default OpenRouter models in `.env.example` are free-tier `:free` variants; you can swap them anytime from https://openrouter.ai/models.
-
-### Environment Variables
-
-Core config in `.env`:
-- `MODEL_PROVIDER_ORDER` controls provider rotation order.
-- `OPENROUTER_MODEL_STRATEGIC|ANALYTICAL|RULE|FAST` set per-tier models.
-- `MARKET_DATABASE_PATH` and `CHROMA_DB_PATH` control persistence locations.
+- Challenge requirements: [`context/multi-agent-marketplace-simulation.md`](context/multi-agent-marketplace-simulation.md).
+- Evaluation guidelines: [`context/global-guidelines.md`](context/global-guidelines.md).
+- Extended architecture: [`TECHNICAL_DOCS.md`](TECHNICAL_DOCS.md).
+- Agent rules: [`AGENTS.md`](AGENTS.md).
 
 ## Tech Stack
 
-- Python 3.12
-- LiteLLM (LLM routing)
-- OpenRouter (optional routing and free-tier models)
-- SQLModel + SQLite (ledger)
-- ChromaDB (agent memory)
-- Rich (terminal UI)
-- pandas + matplotlib (analysis)
-
-## Documentation
-
-- `TECHNICAL_DOCS.md` for architecture and data flow
-- `AGENTS.md` for agent workflow rules
-
-## References
-
-- Agent Laboratory: https://agentlaboratory.github.io/
-- Generative Agents: https://github.com/joonspk-research/generative_agents
-
-## Development
-
-Run tests:
-```bash
-uv run pytest tests/ -v
-```
-
-## Reproducibility
-
-### Local Docker
-Docker is available for consistent runs:
-```bash
-docker build -t agent-market .
-docker run --env-file .env agent-market
-```
-
-### Production Deployment (AWS EC2)
-
-For a persistent, 24/7 simulation with a web dashboard:
-
-1.  **Launch EC2 Instance:** Use Ubuntu 22.04 LTS (t2.micro is supported).
-2.  **Open Ports:** Ensure Port 80 (HTTP) is open in your Security Group.
-3.  **Setup Instance:**
-    ```bash
-    git clone https://github.com/your-username/agent-market.git
-    cd agent-market
-    ./scripts/setup_ec2.sh
-    # Log out and back in to apply docker group permissions
-    ```
-4.  **Configure Environment:**
-    ```bash
-    cp .env.example .env
-    nano .env  # Add your API keys and configuration
-    ```
-5.  **Pre-Flight Check:** (New!)
-    ```bash
-    ./scripts/pre_deploy_check.sh
-    ```
-6.  **Deploy:**
-    ```bash
-    ./scripts/deploy.sh
-    ```
-7.  **Access:** Open your EC2 Public IP in a browser to view the dashboard.
-
-The production setup uses Nginx as a reverse proxy, FastAPI for the backend, and Next.js for the frontend, all orchestrated via `docker-compose.prod.yml`.
+- Python 3.12, `uv`, `litellm`, `sqlmodel`, `rich`, `asyncio`.
+- ChromaDB vector store for agent memory.
+- FastAPI + WebSockets + Next.js 16 dashboard for observability.
+- Docker Compose + Nginx for reproducible deployment.

@@ -140,6 +140,7 @@ class SimulationRunner:
             results = await asyncio.gather(*[run_agent(a) for a in self.agents], return_exceptions=True)
             
             tick_logs = []
+            # Persist each agent action as an interaction log entry for observability.
             for res in results:
                 if isinstance(res, dict):
                     tick_logs.append(res)
@@ -161,4 +162,5 @@ class SimulationRunner:
             self.latest_logs = self.latest_logs[-50:]
             
             elapsed = time.time() - tick_start
+            # Maintain a steady tick duration for human readability.
             await asyncio.sleep(max(0, 2.0 - elapsed))

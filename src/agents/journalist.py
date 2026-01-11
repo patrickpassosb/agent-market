@@ -94,6 +94,7 @@ class JournalistAgent:
             if last_price > first_price: trend = "rising"
             elif last_price < first_price: trend = "falling"
 
+        # Build the user prompt that grounds the journalist in the current statistics.
         prompt = f"""
         You are a financial news journalist reporting on a Bitcoin-denominated Stock Exchange.
         
@@ -137,5 +138,5 @@ class JournalistAgent:
             content = response.choices[0].message.content
             return _parse_structured_response(JournalistHeadline, content)
         except Exception:
-            # Fallback if LLM fails
+            # Fallback if LLM fails to keep the UI populated with a safe headline.
             return JournalistHeadline(headline=f"{asset} Activity Recorded", body=f"Trading volume remains steady in the {asset} market.")

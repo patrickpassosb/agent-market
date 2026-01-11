@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Bootstraps the repository on a GCP VM after it is created (installs deps, deploys via Docker).
 echo ">>> Starting GCP VM setup..."
 
 REPO_DIR="${REPO_DIR:-$HOME/agent-market}"

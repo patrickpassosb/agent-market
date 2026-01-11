@@ -6,7 +6,7 @@
 **Title:** Comprehensive Codebase Documentation & Architectural Reference
 
 ### Goal Statement
-**Goal:** Fully document the `agent-market` repository with clear docstrings, README/TECHNICAL_DOCS updates, and architecture explanation so a new developer can understand, run, and extend the system confidently.
+**Goal:** Fully document the entire `agent-market` repository, including every module, component, and documentation artifact, so a new developer can understand, run, and extend the system confidently while meeting the AGENTS, `global-guidelines.md`, and `multi-agent-marketplace-simulation.md` requirements.
 
 ---
 
@@ -23,11 +23,10 @@
 ### Problem Statement
 While the high-level docs are good, the code itself needs to be self-documenting. A new developer might struggle to understand the nuances of the order matching algorithm or the specific prompt engineering used in the agents without deep diving.
 
-### Success Criteria
-- [ ] All Python files have module-level docstrings and key classes/functions documented.
-- [ ] README includes purpose, architecture diagram, setup, config, usage, demo guide, and evidence paths.
-- [ ] TECHNICAL_DOCS explains architecture, data flow, and key abstractions accurately.
-- [ ] Documentation audit performed with gaps addressed.
+- [ ] Every file (code, scripts, docs) carries clear docstrings/comments that explain purpose, logic, assumptions, and edge cases.
+- [ ] README satisfies `global-guidelines.md` and `multi-agent-marketplace-simulation.md` requirements (purpose, architecture, setup/config, usage, demo/validation guidance, and evidence paths).
+- [ ] TECHNICAL_DOCS captures the architecture, component interactions, data/control flow, and any patterns or dependencies.
+- [ ] Documentation audit is completed, gaps noted, and improvements tracked in comments or docs.
 
 ---
 

@@ -1,5 +1,7 @@
 version: '3.8'
 
+# Production-oriented compose file: backend API, Next.js frontend, and nginx reverse proxy.
+
 services:
   backend:
     build:

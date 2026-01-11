@@ -2,6 +2,11 @@
 
 import { UserCircleIcon } from "@heroicons/react/24/outline";
 
+/**
+ * AgentRoster renders the list of active agents with their persona, model, and ROI.
+ * It is used exclusively within the premium dashboard layout to surface realtime behavior.
+ */
+
 type AgentItem = {
     id: string;
     persona: string;
@@ -47,6 +52,7 @@ export default function AgentRoster({ agents }: { agents: AgentItem[] }) {
                                     </div>
                                 </div>
                             </div>
+                            {/* ROI badge uses primary/ accent palette to indicate positive/negative performance */}
                             <div className={`rounded-lg px-2 py-1 text-[10px] font-bold uppercase tracking-wider ${(agent.portfolio?.pnl ?? 0) >= 0 ? 'bg-primary/10 text-primary' : 'bg-accent/10 text-accent'
                                 }`}>
                                 {(agent.portfolio?.pnl_percent ?? 0).toFixed(2)}%
@@ -60,6 +66,7 @@ export default function AgentRoster({ agents }: { agents: AgentItem[] }) {
                             </p>
                         </div>
 
+                        {/* Provide a lightweight activity hint, using placeholder text when idle */}
                         <div className="mt-auto border-t border-white/5 pt-3">
                             <p className="text-[10px] text-white/40 italic truncate">
                                 {agent.last_action || "Waiting for market signal..."}

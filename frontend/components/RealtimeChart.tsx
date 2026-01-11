@@ -17,6 +17,9 @@ type RealtimeChartProps = {
   symbol: string;
 };
 
+/**
+ * RealtimeChart instantiates a lightweight-charts AreaSeries and pipes in the latest ticker point.
+ */
 export default function RealtimeChart({ latestPoint, symbol }: RealtimeChartProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);

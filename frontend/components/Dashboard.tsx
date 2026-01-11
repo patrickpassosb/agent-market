@@ -7,11 +7,17 @@ import RealtimeChart from "./RealtimeChart";
 import AgentRoster from "./AgentRoster";
 import SentimentFeed from "./SentimentFeed";
 import {
-  ChartBarIcon,
   CpuChipIcon,
   GlobeAltIcon,
   ServerIcon
 } from "@heroicons/react/24/outline";
+
+/**
+ * Dashboard coordinates API polling, WebSocket streaming, and the premium UI panels.
+ *
+ * It keeps local state for tickers, news, sentiment, performance metrics, and selected symbol,
+ * and stitches together `MarketPulse`, `RealtimeChart`, `AgentRoster`, and `SentimentFeed`.
+ */
 
 type Ticker = "AAPL" | "TSLA" | "NVDA" | "MSFT";
 type TickerMap = Record<Ticker, number>;
@@ -70,6 +76,7 @@ export default function Dashboard() {
   }, [tickers, activeSymbol]);
 
   useEffect(() => {
+    // Initial HTTP poll to bootstrap market state + agent roster.
     const fetchData = async () => {
       try {
         const [marketRes, agentsRes] = await Promise.all([
@@ -96,6 +103,7 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
+    // Maintain a resilient WebSocket connection to stream live updates.
     let socket: WebSocket | null = null;
     let reconnectTimer: any;
 
@@ -171,7 +179,7 @@ export default function Dashboard() {
       </nav>
 
       <main className="grid flex-1 gap-6 p-6 lg:grid-cols-[300px_1fr_350px]">
-        {/* Left Column: Market Watch */}
+        {/* Left Column: Market Pulse & Sentiment */}
         <section className="flex flex-col gap-6 pr-2">
           <div className="glass-panel rounded-[2.5rem] p-6 shadow-indigo-500/5">
             <MarketPulse
@@ -210,7 +218,7 @@ export default function Dashboard() {
           </div>
         </section>
 
-        {/* Center Column: Chart & Agents */}
+        {/* Center Column: Chart & Main Agent Roster */}
         <section className="flex flex-col gap-6">
           <div className="glass-panel flex-1 rounded-[2.5rem] p-8">
             <RealtimeChart key={activeSymbol} latestPoint={latestChartPoint} symbol={activeSymbol} />
@@ -220,7 +228,7 @@ export default function Dashboard() {
           </div>
         </section>
 
-        {/* Right Column: Feed */}
+        {/* Right Column: Sentiment & Headlines */}
         <section className="flex flex-col gap-6">
           <div className="glass-panel flex-1 rounded-[2.5rem] p-8 overflow-y-auto">
             <SentimentFeed latestNews={latestNews} />

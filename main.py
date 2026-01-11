@@ -147,6 +147,9 @@ def create_activity_table(agents: list[Trader], recent_actions: Iterable[ActionL
     return Panel(table, title="Live Feed")
 
 def _format_optional_float(value: float | None, decimals: int = 6) -> str:
+    """
+    Normalize a float for display, returning 'n/a' when the value is invalid.
+    """
     if value is None or not math.isfinite(value):
         return "n/a"
     return f"{value:.{decimals}f}"
@@ -161,6 +164,9 @@ def _build_run_summary(
     report_dir: str | None,
     report_enabled: bool,
 ) -> dict[str, object]:
+    """
+    Compile aggregated metrics for the completed simulation to show in the console summary.
+    """
     prices = [tx.price for tx in transactions]
     avg_price = sum(prices) / len(prices) if prices else None
     min_price = min(prices) if prices else None
@@ -194,6 +200,9 @@ def _build_run_summary(
 
 
 def _render_run_summary(summary: dict[str, object]) -> None:
+    """
+    Render the final summary table using Rich once the simulation stops.
+    """
     table = Table(title="End of Simulation Summary")  # https://github.com/textualize/rich/blob/master/docs/source/tables.rst (Context7 /textualize/rich)
     table.add_column("Metric", style="bold")
     table.add_column("Value")
@@ -334,6 +343,7 @@ async def main():
                     random.shuffle(agents)
 
                     # --- PHASE 2: THINK & ACT (Concurrent Batches) ---
+                    # Handle the full sense-think-act cycle for a single agent within the tick
                     async def run_agent(agent: Trader):
                         # Smart Asset Selection: Biases towards assets with higher volatility/movement
                         if random.random() < 0.7:  # 70% chance to follow market "heat"
@@ -354,11 +364,12 @@ async def main():
                             focused_asset = random.choice(SUPPORTED_ASSETS)
                         
                         # Agent perceives state of that asset, retrieves memory, and decides
+                        # Agents perceive the chosen market state before reasoning.
                         state = engine.get_state(focused_asset)
                         decision = await agent.act(state, focused_item=focused_asset, all_current_prices=engine.current_prices)
                         
                         if decision:
-                            # Negotiate a counter-offer
+                            # Negotiate a counter-offer to stay within the current spread
                             negotiated_price, negotiation_details = engine.negotiate_price(
                                 agent_id=agent.id,
                                 action=decision["action"],
@@ -370,6 +381,7 @@ async def main():
                                 engine.ledger.record_interaction(InteractionLog(**negotiation_details))
 
                             # Execute action against the market engine
+                            # Process the accepted price through the MarketEngine (matches order book + ledger).
                             tx = engine.process_action(
                                 agent, 
                                 decision["action"], 

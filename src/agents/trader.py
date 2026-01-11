@@ -175,6 +175,7 @@ class Trader(BaseAgent):
             response = None
             last_error: Exception | None = None
             # LiteLLM fallbacks per Context7 docs: /berriai/litellm (async acompletion).
+            # Try each fallback model in the configured order until one succeeds.
             for model in fallback_models:
                 try:
                     # We use litellm's `response_format` to enforce the Pydantic schema
@@ -210,8 +211,7 @@ class Trader(BaseAgent):
                     # Ensure tradable prices to avoid zero-trade runs (Context7 /python/cpython https://github.com/python/cpython/blob/main/Doc/library/math.rst)
                     decision.price = market_state.current_price if market_state.current_price > 0 else 0.001
 
-            # Log the reasoning to the agent's internal long-term memory
-            # This allows the agent to "remember" why it did something in future turns.
+            # Log the reasoning to the agent's internal long-term memory so future prompts benefit from previous rationale.
             self.remember(f"Decided to {decision.action} {decision.item} at {decision.price}: {decision.reasoning}")
 
             # Convert string action to internal Enum

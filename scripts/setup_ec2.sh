@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Prepare an Ubuntu EC2 host for running the agent-market service (Docker, swap, git).
 echo ">>> Starting EC2 Setup..."
 
 # 1. Update system

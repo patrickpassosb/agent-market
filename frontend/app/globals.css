@@ -1,7 +1,9 @@
+/* Global design tokens for the premium dashboard */
 @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@400;500;600;700&display=swap");
 @import "tailwindcss";
 
 :root {
+  /* Key palette / color tokens used in the UI */
   --background: 222 47% 4%;
   --foreground: 210 40% 98%;
 
@@ -43,6 +45,7 @@
 }
 
 @layer components {
+  /* Reusable glassmorphism panels */
   .glass-panel {
     background-color: hsl(var(--card));
     backdrop-filter: blur(24px);
@@ -51,6 +54,7 @@
     box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.5);
   }
 
+  /* Smaller cards used inside feeds and agent roster */
   .glass-card {
     background-color: hsl(var(--card));
     backdrop-filter: blur(24px);

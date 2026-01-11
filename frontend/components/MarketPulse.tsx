@@ -11,7 +11,12 @@ type MarketPulseProps = {
     onSelectSymbol?: (symbol: string) => void;
 };
 
+/**
+ * MarketPulse renders the ticker list, highlights the live status, and emits
+ * selection events for the active instrument.
+ */
 export default function MarketPulse({ tickers, previous, status, activeSymbol, onSelectSymbol }: MarketPulseProps) {
+    // Derive the list of symbols from the ticker state to keep rendering deterministic.
     const assets = Object.keys(tickers);
 
     return (
@@ -30,6 +35,7 @@ export default function MarketPulse({ tickers, previous, status, activeSymbol, o
             </div>
 
             <div className="flex flex-col gap-3">
+                {/* Each row shows the latest price delta and status indicator */}
                 {assets.map((symbol) => {
                     const price = tickers[symbol];
                     const prev = previous[symbol] || price;

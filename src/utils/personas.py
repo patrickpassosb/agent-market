@@ -94,7 +94,21 @@ GEMINI_MODELS = {
     "fast": "gemini/gemini-2.5-flash-preview-09-2025",
 }
 
+# Vertex AI models use the vertex_ai/ prefix per LiteLLM docs (Context7 /berriai/litellm).
+# We use Pro for strategic/analytical tasks to leverage the robust quota.
+VERTEX_MODELS = {
+    "strategic": "vertex_ai/gemini-1.5-pro",
+    "analytical": "vertex_ai/gemini-1.5-pro",
+    "rule": "vertex_ai/gemini-1.5-flash",
+    "fast": "vertex_ai/gemini-1.5-flash",
+}
+
 def _ollama_enabled() -> bool:
+    """
+    Detect whether Ollama should be considered as a provider.
+    Ollama can be activated explicitly via OLLAMA_ENABLED or by configuring
+    any of the OLLAMA_MODEL_* variables.
+    """
     if os.getenv("OLLAMA_ENABLED", "").lower() in {"1", "true", "yes"}:
         return True
     return any(
@@ -119,7 +133,11 @@ _ROUND_ROBIN = {"strategic": 0, "analytical": 0, "rule": 0, "fast": 0}
 
 
 def _available_models(tier: str) -> list[str]:
-    """Return provider models available for a tier based on configured keys."""
+    """
+    Enumerate the configured models for a tier respecting the preferred provider order.
+
+    This method checks the environment for provider credentials before adding them.
+    """
     models: list[str] = []
     for provider in PROVIDER_ORDER:
         provider = provider.strip()
@@ -137,6 +155,8 @@ def _available_models(tier: str) -> list[str]:
             models.append(GROQ_MODELS[tier])
         elif provider == "gemini" and os.getenv("GEMINI_API_KEY"):
             models.append(GEMINI_MODELS[tier])
+        elif provider == "vertex_ai" and os.getenv("VERTEXAI_PROJECT"):
+            models.append(VERTEX_MODELS[tier])
     return models
 
 
@@ -146,7 +166,11 @@ def get_models_for_tier(tier: str) -> list[str]:
 
 
 def _choose_model(tier: str) -> str:
-    """Round-robin select a model for a tier from available providers."""
+    """
+    Round-robin through available providers for a tier.
+
+    Falls back to the Groq fast tier if no configured provider is available.
+    """
     candidates = _available_models(tier)
     if not candidates:
         return GROQ_MODELS["fast"]
@@ -156,7 +180,11 @@ def _choose_model(tier: str) -> str:
 
 
 def _persona_tier(persona: str) -> str:
-    """Classify a persona into a routing tier."""
+    """
+    Map a textual persona description to a routing tier.
+
+    Keywords are used to bias decision-making: strategic, analytical, rule-based, or fast.
+    """
     p_lower = persona.lower()
     if any(k in p_lower for k in STRATEGIC_KEYWORDS):
         return "strategic"
@@ -168,7 +196,7 @@ def _persona_tier(persona: str) -> str:
 
 
 def get_persona_tier(persona: str) -> str:
-    """Public wrapper for persona tier selection."""
+    """Public wrapper for persona tier classification."""
     return _persona_tier(persona)
 
 def get_model_for_persona(persona: str) -> str:
