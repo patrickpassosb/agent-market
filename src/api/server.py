@@ -11,15 +11,26 @@ import logging
 import os
 from contextlib import asynccontextmanager, suppress
 
-logger = logging.getLogger(__name__)
-
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, status
+from fastapi import (
+    Depends,
+    FastAPI,
+    HTTPException,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+    status,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.security import APIKeyHeader
 from starlette.middleware.base import BaseHTTPMiddleware
+
+from src.market.schema import QUOTE_CURRENCY, SUPPORTED_ASSETS, Transaction
+from src.simulation.runner import SimulationRunner
+
+logger = logging.getLogger(__name__)
 
 # --- Configuration ---
 
@@ -30,10 +41,10 @@ API_KEY_NAME = "X-API-Key"
 API_KEY = os.getenv("API_KEY")
 api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
 
-ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",")
-
-from src.market.schema import QUOTE_CURRENCY, SUPPORTED_ASSETS, Transaction
-from src.simulation.runner import SimulationRunner
+ALLOWED_ORIGINS = os.getenv(
+    "ALLOWED_ORIGINS",
+    "http://localhost:3000,http://127.0.0.1:3000",
+).split(",")
 
 # --- Global State ---
 
@@ -52,7 +63,9 @@ def _transaction_to_dict(tx: Transaction | None) -> dict | None:
         "run_id": tx.run_id,
     }
 
+
 # --- Security Dependency ---
+
 
 async def get_api_key(api_key: str | None = Depends(api_key_header)):
     """
@@ -66,7 +79,9 @@ async def get_api_key(api_key: str | None = Depends(api_key_header)):
         )
     return api_key
 
+
 # --- Custom Security Headers ---
+
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """Injects security headers to harden the HTTP responses."""
@@ -77,10 +92,14 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-        response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; object-src 'none';"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; script-src 'self'; object-src 'none';"
+        )
         return response
 
+
 # --- FastAPI App ---
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -101,18 +120,22 @@ async def lifespan(app: FastAPI):
             await broadcast_task
         await sim.stop()
 
+
 app = FastAPI(
-    title="Agent Market API", 
+    title="Agent Market API",
     lifespan=lifespan,
     docs_url="/docs" if os.getenv("ENV") != "production" else None,
-    redoc_url=None
+    redoc_url=None,
 )
 
 # Security & Performance Middlewares
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(
-    TrustedHostMiddleware, 
-    allowed_hosts=os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1,testserver").split(",")
+    TrustedHostMiddleware,
+    allowed_hosts=os.getenv(
+        "ALLOWED_HOSTS",
+        "localhost,127.0.0.1,testserver",
+    ).split(","),
 )
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
@@ -126,6 +149,7 @@ app.add_middleware(
 )
 
 # --- WebSocket Manager ---
+
 
 class ConnectionManager:
     """Tracks active WebSocket clients and provides a simple broadcast helper."""
@@ -156,9 +180,11 @@ class ConnectionManager:
             except Exception:
                 self.disconnect(connection)
 
+
 manager = ConnectionManager()
 
 # --- Background Broadcaster ---
+
 
 async def broadcast_loop():
     """
@@ -171,28 +197,35 @@ async def broadcast_loop():
             sentiment = sim.engine.get_global_sentiment()
             metrics = sim.engine.get_market_metrics()
             latest_tx = sim.engine.get_latest_transaction()
-            await manager.broadcast({
-                "type": "ticker",
-                "data": dict(sim.engine.current_prices),
-                "sentiment": sentiment,
-                "metrics": metrics,
-                "tick": sim.tick_count,
-                "latest_transaction": _transaction_to_dict(latest_tx),
-            })
+            await manager.broadcast(
+                {
+                    "type": "ticker",
+                    "data": dict(sim.engine.current_prices),
+                    "sentiment": sentiment,
+                    "metrics": metrics,
+                    "tick": sim.tick_count,
+                    "latest_transaction": _transaction_to_dict(latest_tx),
+                }
+            )
             if sim.latest_news and sim.latest_news.get("tick", 0) > last_news_tick:
                 last_news_tick = sim.latest_news["tick"]
-                await manager.broadcast({
-                    "type": "news",
-                    "data": sim.latest_news
-                })
+                await manager.broadcast(
+                    {
+                        "type": "news",
+                        "data": sim.latest_news,
+                    }
+                )
         await asyncio.sleep(0.5)
 
+
 # --- Endpoints ---
+
 
 @app.get("/health")
 def get_health():
     """Simple health check endpoint consumed by load balancers or readiness scripts."""
     return {"status": "ok", "running": sim.running}
+
 
 @app.get("/state", dependencies=[Depends(get_api_key)])
 def get_state():
@@ -218,6 +251,7 @@ def get_state():
         "history": history_payload,
     }
 
+
 @app.get("/agents", dependencies=[Depends(get_api_key)])
 def get_agents():
     """
@@ -230,10 +264,11 @@ def get_agents():
             "id": a.id,
             "persona": a.persona,
             "model": a.model_name,
-            "portfolio": a.portfolio.get_metrics(sim.engine.current_prices)
+            "portfolio": a.portfolio.get_metrics(sim.engine.current_prices),
         }
         for a in sim.agents
     ]
+
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket, api_key: str | None = None):
@@ -253,10 +288,12 @@ async def websocket_endpoint(websocket: WebSocket, api_key: str | None = None):
     if sim.engine:
         data = dict(sim.engine.current_prices)
         try:
-            await websocket.send_json({
-                "type": "ticker",
-                "data": data,
-            })
+            await websocket.send_json(
+                {
+                    "type": "ticker",
+                    "data": data,
+                }
+            )
             logger.debug("initial websocket payload sent to %s", websocket.client)
         except Exception as exc:
             logger.debug("initial websocket payload failed: %s", exc)

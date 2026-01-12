@@ -41,7 +41,8 @@ def generate_market_summary_plot(tx_df: pd.DataFrame, output_dir: str) -> dict[s
     plots: dict[str, str] = {}
 
     fig, ax = plt.subplots(figsize=(12, 6))
-    sns.lineplot(  # https://github.com/mwaskom/seaborn/blob/master/doc/_docstrings/lineplot.ipynb (Context7 /mwaskom/seaborn)
+    # Context7 /mwaskom/seaborn (lineplot docs).
+    sns.lineplot(
         data=tx_df,
         x="timestamp",
         y="price",
@@ -53,7 +54,8 @@ def generate_market_summary_plot(tx_df: pd.DataFrame, output_dir: str) -> dict[s
     ax.set_ylabel(f"Price ({QUOTE_CURRENCY})")
     ax.grid(True, alpha=0.3)
     combined_path = os.path.join(output_dir, "price_history.png")
-    fig.savefig(combined_path, dpi=200, bbox_inches="tight")  # https://github.com/matplotlib/matplotlib/blob/main/galleries/users_explain/figure/figure_intro.rst (Context7 /matplotlib/matplotlib)
+    # Context7 /matplotlib/matplotlib (figure intro docs).
+    fig.savefig(combined_path, dpi=200, bbox_inches="tight")
     plt.close(fig)
     plots["all_assets"] = combined_path
 
@@ -62,7 +64,8 @@ def generate_market_summary_plot(tx_df: pd.DataFrame, output_dir: str) -> dict[s
         if asset_df.empty:
             continue
         fig, ax = plt.subplots(figsize=(10, 4))
-        sns.lineplot(  # https://github.com/mwaskom/seaborn/blob/master/doc/_docstrings/lineplot.ipynb (Context7 /mwaskom/seaborn)
+        # Context7 /mwaskom/seaborn (lineplot docs).
+        sns.lineplot(
             data=asset_df,
             x="timestamp",
             y="price",
@@ -73,7 +76,8 @@ def generate_market_summary_plot(tx_df: pd.DataFrame, output_dir: str) -> dict[s
         ax.set_ylabel(f"Price ({QUOTE_CURRENCY})")
         ax.grid(True, alpha=0.3)
         asset_path = os.path.join(output_dir, f"price_history_{asset}.png")
-        fig.savefig(asset_path, dpi=200, bbox_inches="tight")  # https://github.com/matplotlib/matplotlib/blob/main/galleries/users_explain/figure/figure_intro.rst (Context7 /matplotlib/matplotlib)
+        # Context7 /matplotlib/matplotlib (figure intro docs).
+        fig.savefig(asset_path, dpi=200, bbox_inches="tight")
         plt.close(fig)
         plots[asset] = asset_path
 
@@ -86,7 +90,8 @@ def generate_agent_performance_chart(agent_df: pd.DataFrame, output_path: str) -
         return None
 
     fig, ax = plt.subplots(figsize=(10, 4))
-    sns.barplot(  # https://github.com/mwaskom/seaborn/blob/master/doc/api.rst (Context7 /mwaskom/seaborn)
+    # Context7 /mwaskom/seaborn (barplot docs).
+    sns.barplot(
         data=agent_df,
         x="agent_id",
         y="roi",
@@ -97,7 +102,8 @@ def generate_agent_performance_chart(agent_df: pd.DataFrame, output_path: str) -
     ax.set_ylabel("ROI (%)")
     ax.tick_params(axis="x", rotation=45)
     ax.grid(True, axis="y", alpha=0.3)
-    fig.savefig(output_path, dpi=200, bbox_inches="tight")  # https://github.com/matplotlib/matplotlib/blob/main/galleries/users_explain/figure/figure_intro.rst (Context7 /matplotlib/matplotlib)
+    # Context7 /matplotlib/matplotlib (figure intro docs).
+    fig.savefig(output_path, dpi=200, bbox_inches="tight")
     plt.close(fig)
     return output_path
 
@@ -107,15 +113,16 @@ def _generate_agent_activity_chart(tx_df: pd.DataFrame, output_path: str) -> str
     if tx_df.empty:
         return None
 
-    agent_counts = tx_df["buyer_id"].value_counts().add(
-        tx_df["seller_id"].value_counts(), fill_value=0
+    agent_counts = (
+        tx_df["buyer_id"].value_counts().add(tx_df["seller_id"].value_counts(), fill_value=0)
     )
     agent_df = agent_counts.rename("trade_count").reset_index()
     agent_df.columns = ["agent_id", "trade_count"]
     agent_df = agent_df.sort_values(by="trade_count", ascending=False)
 
     fig, ax = plt.subplots(figsize=(10, 4))
-    sns.barplot(  # https://github.com/mwaskom/seaborn/blob/master/doc/api.rst (Context7 /mwaskom/seaborn)
+    # Context7 /mwaskom/seaborn (barplot docs).
+    sns.barplot(
         data=agent_df,
         x="agent_id",
         y="trade_count",
@@ -126,12 +133,17 @@ def _generate_agent_activity_chart(tx_df: pd.DataFrame, output_path: str) -> str
     ax.set_ylabel("Total Transactions")
     ax.tick_params(axis="x", rotation=45)
     ax.grid(True, axis="y", alpha=0.3)
-    fig.savefig(output_path, dpi=200, bbox_inches="tight")  # https://github.com/matplotlib/matplotlib/blob/main/galleries/users_explain/figure/figure_intro.rst (Context7 /matplotlib/matplotlib)
+    # Context7 /matplotlib/matplotlib (figure intro docs).
+    fig.savefig(output_path, dpi=200, bbox_inches="tight")
     plt.close(fig)
     return output_path
 
 
-def plot_market_history(db_path: str = "market.db", output_dir: str = "plots", run_id: str | None = None):
+def plot_market_history(
+    db_path: str = "market.db",
+    output_dir: str = "plots",
+    run_id: str | None = None,
+):
     """Reads the ledger and generates market analysis plots."""
     if not os.path.exists(db_path):
         print(f"Database {db_path} not found.")
@@ -147,7 +159,10 @@ def plot_market_history(db_path: str = "market.db", output_dir: str = "plots", r
 
     _ensure_dir(output_dir)
     plots = generate_market_summary_plot(tx_df, output_dir)
-    activity_path = _generate_agent_activity_chart(tx_df, os.path.join(output_dir, "agent_activity.png"))
+    activity_path = _generate_agent_activity_chart(
+        tx_df,
+        os.path.join(output_dir, "agent_activity.png"),
+    )
 
     if plots:
         print(f"Saved {plots.get('all_assets')}")

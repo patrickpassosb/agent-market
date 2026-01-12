@@ -17,7 +17,8 @@ def _model_to_json_dict(model: BaseModel) -> dict:
     """
     Serialize a Pydantic/SQLModel instance to a JSON-ready dict.
     """
-    return model.model_dump(mode="json")  # https://docs.pydantic.dev/latest/api/base_model (Context7 /websites/pydantic_dev)
+    # Context7 /websites/pydantic_dev (BaseModel model_dump).
+    return model.model_dump(mode="json")
 
 
 def build_checkpoint(
@@ -31,7 +32,8 @@ def build_checkpoint(
     Build a JSON-serializable checkpoint payload.
     """
     return {
-        "timestamp": datetime.now(UTC).isoformat(),  # https://github.com/python/cpython/blob/main/Doc/library/datetime.rst (Context7 /python/cpython)
+        # Context7 /python/cpython (datetime docs).
+        "timestamp": datetime.now(UTC).isoformat(),
         "tick": tick,
         "market_state": {
             "current_prices": current_prices,
@@ -54,8 +56,10 @@ def write_checkpoint(payload: dict, checkpoint_dir: str, filename: str) -> str:
     """
     Write a checkpoint payload to disk and return the path.
     """
-    os.makedirs(checkpoint_dir, exist_ok=True)  # https://github.com/python/cpython/blob/main/Doc/faq/library.rst (Context7 /python/cpython)
+    # Context7 /python/cpython (os.makedirs docs).
+    os.makedirs(checkpoint_dir, exist_ok=True)
     path = os.path.join(checkpoint_dir, filename)
     with open(path, "w", encoding="utf-8") as handle:
-        json.dump(payload, handle, indent=2, sort_keys=True)  # https://github.com/python/cpython/blob/main/Doc/library/json.rst (Context7 /python/cpython)
+        # Context7 /python/cpython (json docs).
+        json.dump(payload, handle, indent=2, sort_keys=True)
     return path

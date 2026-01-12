@@ -86,10 +86,10 @@ def test_process_action_buy_match(engine, mock_agent):
     """Test successful BUY match and portfolio update."""
     # Add a sell order first to match against
     engine.order_book.add_sell("agent_seller", "AAPL", 5.0)
-    
+
     # Process BUY action at same price
     tx = engine.process_action(mock_agent, AgentAction.BUY, "AAPL", 5.0)
-    
+
     assert isinstance(tx, Transaction)
     assert tx.price == 5.0
     assert tx.item == "AAPL"
@@ -107,10 +107,10 @@ def test_process_action_sell_match(engine, mock_agent):
 
     # Add a buy order first to match against
     engine.order_book.add_buy("agent_buyer", "AAPL", 8.0)
-    
+
     # Process SELL action
     tx = engine.process_action(mock_agent, AgentAction.SELL, "AAPL", 8.0)
-    
+
     assert isinstance(tx, Transaction)
     assert tx.price == 8.0
     assert mock_agent.portfolio.cash == initial_cash + 8.0
@@ -121,9 +121,9 @@ def test_process_action_insufficient_funds(engine, mock_agent):
     """Test BUY failure due to insufficient portfolio cash."""
     mock_agent.portfolio.cash = 1.0
     engine.order_book.add_sell("agent_seller", "AAPL", 5.0)
-    
+
     tx = engine.process_action(mock_agent, AgentAction.BUY, "AAPL", 5.0)
-    
+
     assert tx is None
     assert mock_agent.portfolio.cash == 1.0
     assert "AAPL" not in mock_agent.portfolio.positions
@@ -133,9 +133,9 @@ def test_process_action_insufficient_assets(engine, mock_agent):
     """Test SELL failure due to insufficient portfolio assets."""
     # Agent has no AAPL
     engine.order_book.add_buy("agent_buyer", "AAPL", 5.0)
-    
+
     tx = engine.process_action(mock_agent, AgentAction.SELL, "AAPL", 5.0)
-    
+
     assert tx is None
     assert mock_agent.portfolio.cash == 10.0
 
@@ -146,7 +146,7 @@ def test_get_market_metrics(engine):
     engine.price_history["AAPL"] = [1.0, 1.01, 0.99, 1.0]
     metrics = engine.get_market_metrics()
     assert metrics["volatility"] == "Low"
-    
+
     # High volatility
     engine.price_history["TSLA"] = [1.0, 1.5, 0.5, 2.0]
     metrics = engine.get_market_metrics()
@@ -159,19 +159,19 @@ def test_negotiate_price(engine):
     engine.order_book.add_sell("seller", "AAPL", 10.0)
     # Agent wants to buy at 8.0, seller is at 10.0
     new_price, details = engine.negotiate_price("agent_1", AgentAction.BUY, "AAPL", 8.0)
-    assert new_price == 9.0 # (8+10)/2
+    assert new_price == 9.0  # (8+10)/2
     assert details["kind"] == "negotiation"
     assert details["price"] == 9.0
 
     engine.order_book.add_buy("buyer", "TSLA", 20.0)
     # Agent wants to sell at 30.0, buyer is at 20.0
     new_price, details = engine.negotiate_price("agent_1", AgentAction.SELL, "TSLA", 30.0)
-    assert new_price == 25.0 # (30+20)/2
+    assert new_price == 25.0  # (30+20)/2
     assert details["price"] == 25.0
 
 
 def test_get_state(engine):
     """Test market state construction."""
     state = engine.get_state("AAPL")
-    assert state.current_price == 0.005 # Default seed price
+    assert state.current_price == 0.005  # Default seed price
     assert "best_bid" in state.order_book_summary

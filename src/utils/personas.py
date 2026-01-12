@@ -26,19 +26,53 @@ class PersonaStrategy(Enum):
     RUMOR_MONGER = "rumor_monger"
     DCA = "dca"
 
+
 PERSONA_MAP = {
-    PersonaStrategy.CONSERVATIVE: "A conservative long-term investor who only buys when prices are historically low and holds for long periods.",
-    PersonaStrategy.MOMENTUM: "A high-frequency momentum trader who buys when prices are rising and sells quickly when they dip.",
-    PersonaStrategy.PANIC: "A panic seller who gets anxious when prices drop even slightly and sells immediately to cut losses.",
-    PersonaStrategy.VALUE: "A patient value investor who calculates intrinsic value and buys undervalued assets, ignoring short-term noise.",
-    PersonaStrategy.CONTRARIAN: "A contrarian who always bets against the current market trend; selling when everyone buys and buying when everyone sells.",
-    PersonaStrategy.FOMO: "A FOMO (Fear Of Missing Out) buyer who jumps in whenever they see a price spike, regardless of fundamentals.",
-    PersonaStrategy.ALGORITHMIC: "A disciplined algorithmic trader who follows strict rules: buy at X% drop, sell at Y% gain.",
-    PersonaStrategy.DAY_TRADER: "A skittish day trader who makes many small trades but exits positions at the end of every day.",
-    PersonaStrategy.WHALE: "A whale who accumulates massive quantities slowly to not disturb the price, then holds.",
-    PersonaStrategy.MARKET_MAKER: "A market maker who tries to profit from the spread, placing both buy and sell orders around the current price.",
-    PersonaStrategy.RUMOR_MONGER: "A rumor monger who trades based on 'news' (random fluctuations) rather than price trends.",
-    PersonaStrategy.DCA: "A DCA (Dollar Cost Average) buyer who buys a fixed amount every tick regardless of price."
+    PersonaStrategy.CONSERVATIVE: (
+        "A conservative long-term investor who only buys when prices are historically "
+        "low and holds for long periods."
+    ),
+    PersonaStrategy.MOMENTUM: (
+        "A high-frequency momentum trader who buys when prices are rising and sells "
+        "quickly when they dip."
+    ),
+    PersonaStrategy.PANIC: (
+        "A panic seller who gets anxious when prices drop even slightly and sells "
+        "immediately to cut losses."
+    ),
+    PersonaStrategy.VALUE: (
+        "A patient value investor who calculates intrinsic value and buys undervalued "
+        "assets, ignoring short-term noise."
+    ),
+    PersonaStrategy.CONTRARIAN: (
+        "A contrarian who always bets against the current market trend; selling when "
+        "everyone buys and buying when everyone sells."
+    ),
+    PersonaStrategy.FOMO: (
+        "A FOMO (Fear Of Missing Out) buyer who jumps in whenever they see a price "
+        "spike, regardless of fundamentals."
+    ),
+    PersonaStrategy.ALGORITHMIC: (
+        "A disciplined algorithmic trader who follows strict rules: buy at X% drop, "
+        "sell at Y% gain."
+    ),
+    PersonaStrategy.DAY_TRADER: (
+        "A skittish day trader who makes many small trades but exits positions at the "
+        "end of every day."
+    ),
+    PersonaStrategy.WHALE: (
+        "A whale who accumulates massive quantities slowly to not disturb the price, then holds."
+    ),
+    PersonaStrategy.MARKET_MAKER: (
+        "A market maker who tries to profit from the spread, placing both buy and "
+        "sell orders around the current price."
+    ),
+    PersonaStrategy.RUMOR_MONGER: (
+        "A rumor monger who trades based on 'news' (random fluctuations) rather than price trends."
+    ),
+    PersonaStrategy.DCA: (
+        "A DCA (Dollar Cost Average) buyer who buys a fixed amount every tick regardless of price."
+    ),
 }
 
 PERSONAS = list(PERSONA_MAP.values())
@@ -53,7 +87,8 @@ PROVIDER_ORDER = os.getenv(
     "cerebras,groq,gemini,openrouter,ollama",
 ).split(",")
 
-# Cerebras models use the cerebras/ prefix per LiteLLM docs (Context7 /berriai/litellm).
+# Cerebras models use the cerebras/ prefix.
+# Context7 /berriai/litellm.
 CEREBRAS_MODELS = {
     "strategic": "cerebras/llama3.1-70b",
     "analytical": "cerebras/llama3.1-70b",
@@ -61,7 +96,8 @@ CEREBRAS_MODELS = {
     "fast": "cerebras/llama3.1-8b",
 }
 
-# SambaNova models use the sambanova/ prefix per LiteLLM docs (Context7 /berriai/litellm).
+# SambaNova models use the sambanova/ prefix.
+# Context7 /berriai/litellm.
 SAMBANOVA_MODELS = {
     "strategic": "sambanova/llama3-70b",
     "analytical": "sambanova/llama3-70b",
@@ -70,7 +106,7 @@ SAMBANOVA_MODELS = {
 }
 
 # OpenRouter uses OPENROUTER_API_KEY and optional OPENROUTER_API_BASE/OR_* envs.
-# https://github.com/berriai/litellm/blob/main/docs/my-website/docs/providers/openrouter.md (Context7 /berriai/litellm)
+# Context7 /berriai/litellm (OpenRouter docs).
 OPENROUTER_MODELS = {
     "strategic": os.getenv("OPENROUTER_MODEL_STRATEGIC"),
     "analytical": os.getenv("OPENROUTER_MODEL_ANALYTICAL"),
@@ -85,8 +121,8 @@ GROQ_MODELS = {
     "fast": "groq/llama-3.1-8b-instant",
 }
 
-# Gemini models use the gemini/ prefix per LiteLLM docs (Context7 /websites/litellm_ai).
-# https://docs.litellm.ai/docs/providers/gemini (Gemini 2.5 Flash preview identifiers)
+# Gemini models use the gemini/ prefix.
+# Context7 /websites/litellm_ai.
 GEMINI_MODELS = {
     "strategic": "gemini/gemini-2.5-flash-preview-09-2025",
     "analytical": "gemini/gemini-2.5-flash-preview-09-2025",
@@ -94,7 +130,8 @@ GEMINI_MODELS = {
     "fast": "gemini/gemini-2.5-flash-preview-09-2025",
 }
 
-# Vertex AI models use the vertex_ai/ prefix per LiteLLM docs (Context7 /berriai/litellm).
+# Vertex AI models use the vertex_ai/ prefix.
+# Context7 /berriai/litellm.
 # We use Pro for strategic/analytical tasks to leverage the robust quota.
 VERTEX_MODELS = {
     "strategic": "vertex_ai/gemini-1.5-pro",
@@ -102,6 +139,7 @@ VERTEX_MODELS = {
     "rule": "vertex_ai/gemini-1.5-flash",
     "fast": "vertex_ai/gemini-1.5-flash",
 }
+
 
 def _ollama_enabled() -> bool:
     """
@@ -121,7 +159,9 @@ def _ollama_enabled() -> bool:
         )
     )
 
-# Ollama models use the ollama_chat/ prefix per LiteLLM docs (Context7 /websites/litellm_ai).
+
+# Ollama models use the ollama_chat/ prefix.
+# Context7 /websites/litellm_ai.
 OLLAMA_MODELS = {
     "strategic": os.getenv("OLLAMA_MODEL_STRATEGIC", "ollama_chat/phi3"),
     "analytical": os.getenv("OLLAMA_MODEL_ANALYTICAL", "ollama_chat/phi3"),
@@ -199,19 +239,20 @@ def get_persona_tier(persona: str) -> str:
     """Public wrapper for persona tier classification."""
     return _persona_tier(persona)
 
+
 def get_model_for_persona(persona: str) -> str:
     """
-    Intelligently assigns an LLM model based on the complexity/archetype of the persona. 
-    
+    Intelligently assigns an LLM model based on the complexity/archetype of the persona.
+
     Strategy:
     - Complex/Strategic roles -> Llama 70B (High reasoning)
     - Analytical roles -> Gemini Flash (Long context/analytical)
     - Strict/Rule-based roles -> GPT-4o Mini (Instruction following)
     - Default/Reactive roles -> Llama 8B (Speed)
-    
+
     Args:
-        persona (str): The agent's persona description. 
-        
+        persona (str): The agent's persona description.
+
     Returns:
         str: The model identifier string for `litellm`.
     """

@@ -9,6 +9,7 @@ It handles:
 """
 
 import math
+import re
 from typing import Literal
 
 import litellm
@@ -18,15 +19,18 @@ from pydantic import BaseModel, Field
 from src.market.schema import QUOTE_CURRENCY, SUPPORTED_ASSETS, AgentAction, MarketState
 from src.prompts.trader import get_trader_system_prompt
 from src.utils.concurrency import GlobalRateLimiter
-from src.utils.personas import PERSONA_MAP, PersonaStrategy, get_models_for_tier, get_persona_tier
+from src.utils.personas import (
+    PERSONA_MAP,
+    PersonaStrategy,
+    get_models_for_tier,
+    get_persona_tier,
+)
 
 from .base import BaseAgent
 
 # --- Data Models for LLM Output ---
 
 litellm.enable_json_schema_validation = True
-
-import re
 
 
 def _sanitize_string(text: str) -> str:
@@ -38,6 +42,7 @@ def _sanitize_string(text: str) -> str:
     # Normalize whitespace
     return " ".join(text.split())
 
+
 def _parse_structured_response(model_cls: type[BaseModel], content):
     """Normalize structured LLM output into a Pydantic model with sanitization."""
     if isinstance(content, model_cls):
@@ -46,7 +51,7 @@ def _parse_structured_response(model_cls: type[BaseModel], content):
         obj = model_cls.model_validate(content)
     else:
         obj = model_cls.model_validate_json(content)
-        
+
     # Sanitize all string fields
     for field in model_cls.model_fields:
         val = getattr(obj, field)
@@ -54,39 +59,44 @@ def _parse_structured_response(model_cls: type[BaseModel], content):
             setattr(obj, field, _sanitize_string(val))
     return obj
 
+
 class TraderDecision(BaseModel):
     """
     Pydantic model defining the expected JSON structure from the LLM.
     Used for strict type validation of the agent's output.
     """
+
     action: Literal["buy", "sell", "hold", "reflection"] = Field(
         description="The action to take. 'reflection' is for internal thought only."
     )
-    item: str = Field(
-        description=f"The ticker symbol to trade. Must be one of {SUPPORTED_ASSETS}."
-    )
-    price: float = Field(
-        description=f"The limit price for the order in {QUOTE_CURRENCY}."
-    )
+    item: str = Field(description=f"The ticker symbol to trade. Must be one of {SUPPORTED_ASSETS}.")
+    price: float = Field(description=f"The limit price for the order in {QUOTE_CURRENCY}.")
     reasoning: str = Field(
         description="A concise explanation (under 1 sentence) for this decision."
     )
 
+
 # --- Agent Implementation ---
+
 
 class Trader(BaseAgent):
     """
     An AI-powered trading agent.
-    
+
     This agent uses a Large Language Model (LLM) to decide on market actions.
     It combines its static 'persona' with dynamic market data and retrieved memories
     to form a decision.
-    
+
     Attributes:
         model_name (str): The specific LLM model identifier (e.g., 'groq/llama-3.1-8b-instant').
     """
 
-    def __init__(self, agent_id: str, strategy: PersonaStrategy, model_name: str = "groq/llama-3.1-8b-instant"):
+    def __init__(
+        self,
+        agent_id: str,
+        strategy: PersonaStrategy,
+        model_name: str = "groq/llama-3.1-8b-instant",
+    ):
         """
         Args:
             agent_id (str): Unique ID.
@@ -97,7 +107,7 @@ class Trader(BaseAgent):
         super().__init__(agent_id, persona)
         self.strategy = strategy
         self.model_name = model_name
-    
+
     def _get_persona_constraints(self) -> str:
         """
         Return specific behavioral rules based on persona type.
@@ -105,48 +115,70 @@ class Trader(BaseAgent):
         """
         # Panic sellers MUST sell on drops
         if self.strategy == PersonaStrategy.PANIC:
-            return "CRITICAL: You MUST sell immediately if the current price is below your average cost."
-        
+            return (
+                "CRITICAL: You MUST sell immediately if the current price is "
+                "below your average cost."
+            )
+
         # Contrarians MUST go against the majority
         elif self.strategy == PersonaStrategy.CONTRARIAN:
-            return "CRITICAL: You MUST trade AGAINST the majority. If bids > asks, you MUST sell. If asks > bids, you MUST buy."
-        
+            return (
+                "CRITICAL: You MUST trade AGAINST the majority. If bids > asks, "
+                "you MUST sell. If asks > bids, you MUST buy."
+            )
+
         # Market makers MUST provide liquidity on both sides
         elif self.strategy == PersonaStrategy.MARKET_MAKER:
-            return "CRITICAL: Your goal is to profit from the spread. You should place BOTH a buy order below market and a sell order above market."
-        
+            return (
+                "CRITICAL: Your goal is to profit from the spread. You should "
+                "place BOTH a buy order below market and a sell order above "
+                "market."
+            )
+
         # FOMO buyers buy on spikes
         elif self.strategy == PersonaStrategy.FOMO:
             return "You are driven by fear of missing out. Buy aggressively when prices are rising."
-        
+
         # Conservative investors only buy dips
-        elif self.strategy == PersonaStrategy.CONSERVATIVE or self.strategy == PersonaStrategy.VALUE:
-            return "You only buy when prices are significantly below historical averages. Be patient and selective."
-        
+        elif (
+            self.strategy == PersonaStrategy.CONSERVATIVE or self.strategy == PersonaStrategy.VALUE
+        ):
+            return (
+                "You only buy when prices are significantly below historical "
+                "averages. Be patient and selective."
+            )
+
         # DCA buyers buy every tick
         elif self.strategy == PersonaStrategy.DCA:
             return "You MUST buy a small amount every single tick, regardless of price."
-        
+
         # Default: no special constraints
         return "Follow your general strategy as described in your persona."
 
-    async def act(self, market_state: MarketState, focused_item: str, all_current_prices: dict[str, float]) -> dict | None:
+    async def act(
+        self,
+        market_state: MarketState,
+        focused_item: str,
+        all_current_prices: dict[str, float],
+    ) -> dict | None:
         """
         Execute one decision cycle.
-        
+
         Steps:
         1. Query Memory: Retrieve relevant past experiences based on "market strategy".
         2. Build Context: Combine Persona, Market Data, and Memories into a system prompt.
         3. Inference: Call the LLM asking for a JSON response conforming to `TraderDecision`.
         4. Parse & Log: Validate output, store reasoning in memory, and return action.
         """
-        
+
         # 1. Get portfolio context
         portfolio_metrics = self.portfolio.get_metrics(all_current_prices)
-        
+
         # 2. Retrieve relevant memories
         recent_memories = self.memory.retrieve_memory("trading decision", n_results=3)
-        memory_context = "\n".join(recent_memories) if recent_memories else "No past trades recorded."
+        memory_context = (
+            "\n".join(recent_memories) if recent_memories else "No past trades recorded."
+        )
 
         # 3. Get persona-specific constraints
         constraints = self._get_persona_constraints()
@@ -159,14 +191,14 @@ class Trader(BaseAgent):
             focused_item=focused_item,
             market_state=market_state,
             portfolio_metrics=portfolio_metrics,
-            memory_context=memory_context
+            memory_context=memory_context,
         )
 
         # 3. Call LLM
         try:
             # Rate limiting
             await GlobalRateLimiter.get_instance().wait()
-            
+
             tier = get_persona_tier(self.persona)
             fallback_models = get_models_for_tier(tier)
             if self.model_name not in fallback_models:
@@ -174,7 +206,7 @@ class Trader(BaseAgent):
 
             response = None
             last_error: Exception | None = None
-            # LiteLLM fallbacks per Context7 docs: /berriai/litellm (async acompletion).
+            # LiteLLM fallbacks per Context7 /berriai/litellm (async acompletion).
             # Try each fallback model in the configured order until one succeeds.
             for model in fallback_models:
                 try:
@@ -183,7 +215,10 @@ class Trader(BaseAgent):
                         model=model,
                         messages=[
                             {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": f"What is your next move for {focused_item}?"}
+                            {
+                                "role": "user",
+                                "content": f"What is your next move for {focused_item}?",
+                            },
                         ],
                         response_format=TraderDecision,
                         num_retries=2,
@@ -195,33 +230,41 @@ class Trader(BaseAgent):
 
             if response is None:
                 raise last_error or RuntimeError("LLM completion failed across fallback models.")
-            
+
             # 4. Process Response
             content = response.choices[0].message.content
-            
+
             # Validate JSON against Pydantic model
             decision = _parse_structured_response(TraderDecision, content)
-            
+
             # Validation: Ensure item is correct
             if decision.item != focused_item:
-                decision.item = focused_item # Force correct item if LLM hallucinates
+                # Force correct item if LLM hallucinates.
+                decision.item = focused_item
 
             if decision.action in ("buy", "sell"):
                 if not math.isfinite(decision.price) or decision.price <= 0:
-                    # Ensure tradable prices to avoid zero-trade runs (Context7 /python/cpython https://github.com/python/cpython/blob/main/Doc/library/math.rst)
-                    decision.price = market_state.current_price if market_state.current_price > 0 else 0.001
+                    # Ensure tradable prices to avoid zero-trade runs.
+                    # Context7 /python/cpython (math docs).
+                    decision.price = (
+                        market_state.current_price if market_state.current_price > 0 else 0.001
+                    )
 
-            # Log the reasoning to the agent's internal long-term memory so future prompts benefit from previous rationale.
-            self.remember(f"Decided to {decision.action} {decision.item} at {decision.price}: {decision.reasoning}")
+            # Log the reasoning to the agent's internal long-term memory so future
+            # prompts benefit from previous rationale.
+            self.remember(
+                f"Decided to {decision.action} {decision.item} at {decision.price}: "
+                f"{decision.reasoning}"
+            )
 
             # Convert string action to internal Enum
             action_enum = AgentAction(decision.action)
-            
+
             return {
                 "action": action_enum,
                 "item": decision.item,
                 "price": decision.price,
-                "reasoning": decision.reasoning
+                "reasoning": decision.reasoning,
             }
 
         except Exception as e:

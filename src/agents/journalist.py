@@ -1,13 +1,14 @@
 """
 Journalist Agent Implementation.
 
-This module defines the `JournalistAgent`, a specialized observer agent that 
-monitors the market state and generates "Breaking News" headlines. 
-It adds narrative flavor to the simulation by converting raw data (price, volume, sentiment) 
+This module defines the `JournalistAgent`, a specialized observer agent that
+monitors the market state and generates "Breaking News" headlines.
+It adds narrative flavor to the simulation by converting raw data (price, volume, sentiment)
 into human-readable financial news.
 """
 
 import os
+import re
 
 import litellm
 from litellm import acompletion
@@ -19,8 +20,6 @@ from src.utils.personas import get_models_for_tier
 
 litellm.enable_json_schema_validation = True
 
-import re
-
 
 def _sanitize_string(text: str) -> str:
     """Strip HTML tags and excessive whitespace."""
@@ -31,6 +30,7 @@ def _sanitize_string(text: str) -> str:
     # Normalize whitespace
     return " ".join(text.split())
 
+
 def _parse_structured_response(model_cls: type[BaseModel], content):
     """Normalize structured LLM output into a Pydantic model with sanitization."""
     if isinstance(content, model_cls):
@@ -39,7 +39,7 @@ def _parse_structured_response(model_cls: type[BaseModel], content):
         obj = model_cls.model_validate(content)
     else:
         obj = model_cls.model_validate_json(content)
-        
+
     # Sanitize all string fields
     for field in model_cls.model_fields:
         val = getattr(obj, field)
@@ -47,18 +47,21 @@ def _parse_structured_response(model_cls: type[BaseModel], content):
             setattr(obj, field, _sanitize_string(val))
     return obj
 
+
 class JournalistHeadline(BaseModel):
     """Structured output format for journalist responses."""
+
     headline: str = Field(description="A short, catchy news headline about the market state.")
     body: str = Field(description="A 2-sentence summary of the market sentiment.")
+
 
 class JournalistAgent:
     """
     An AI-powered observer that narrates the market.
-    
-    This agent does not trade. Instead, it consumes the global `MarketState` and 
+
+    This agent does not trade. Instead, it consumes the global `MarketState` and
     a list of recent `Transaction`s to generate a `JournalistHeadline`.
-    
+
     Attributes:
         model_name (str): The LLM model used for generation (default: Gemini 2.5 Flash).
         api_key (str): API key for the model provider.
@@ -67,23 +70,28 @@ class JournalistAgent:
     # https://docs.litellm.ai/docs/providers/gemini (Gemini 2.5 Flash preview identifiers)
     def __init__(self, model_name: str = "gemini/gemini-2.5-flash-preview-09-2025"):
         """Initialize the journalist with a specific model identifier."""
-        # Gemini models use the gemini/ prefix per LiteLLM docs (Context7 /websites/litellm_ai).
+        # Gemini models use the gemini/ prefix per LiteLLM docs.
+        # Context7 /websites/litellm_ai.
         self.model_name = model_name
         self.api_key = os.getenv("GEMINI_API_KEY")
 
-    async def analyze(self, market_state: MarketState, recent_transactions: list[Transaction]) -> JournalistHeadline:
+    async def analyze(
+        self,
+        market_state: MarketState,
+        recent_transactions: list[Transaction],
+    ) -> JournalistHeadline:
         """
         Analyzes the market state and recent history to generate a news headline.
         """
-        
+
         # Summarize context
         price = market_state.current_price
         bid_count = market_state.order_book_summary["bids_count"]
         ask_count = market_state.order_book_summary["asks_count"]
-        
+
         # Determine asset from transactions or generic
         asset = recent_transactions[0].item if recent_transactions else "Market"
-        
+
         volume = len(recent_transactions)
         trend = "stable"
         if recent_transactions:
@@ -91,8 +99,10 @@ class JournalistAgent:
             sorted_txs = sorted(recent_transactions, key=lambda x: x.timestamp)
             first_price = sorted_txs[0].price
             last_price = sorted_txs[-1].price
-            if last_price > first_price: trend = "rising"
-            elif last_price < first_price: trend = "falling"
+            if last_price > first_price:
+                trend = "rising"
+            elif last_price < first_price:
+                trend = "falling"
 
         # Build the user prompt that grounds the journalist in the current statistics.
         prompt = f"""
@@ -104,7 +114,8 @@ class JournalistAgent:
         - Volume: {volume} trades in the last period.
         - Sentiment: {bid_count} buyers vs {ask_count} sellers.
         
-        Write a short, sensational "Breaking News" headline and a brief body explaining the movement.
+        Write a short, sensational "Breaking News" headline and a brief body explaining
+        the movement.
         Be dramatic but accurate to the data. Remember all assets are priced in {QUOTE_CURRENCY}.
         """
 
@@ -139,4 +150,7 @@ class JournalistAgent:
             return _parse_structured_response(JournalistHeadline, content)
         except Exception:
             # Fallback if LLM fails to keep the UI populated with a safe headline.
-            return JournalistHeadline(headline=f"{asset} Activity Recorded", body=f"Trading volume remains steady in the {asset} market.")
+            return JournalistHeadline(
+                headline=f"{asset} Activity Recorded",
+                body=f"Trading volume remains steady in the {asset} market.",
+            )

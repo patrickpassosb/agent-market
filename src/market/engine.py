@@ -2,7 +2,7 @@
 Market Engine (Facade).
 
 This module serves as the central controller for the market simulation.
-It follows the **Facade Pattern**, providing a simplified interface to the 
+It follows the **Facade Pattern**, providing a simplified interface to the
 complex underlying subsystems: the OrderBook (matching) and the Ledger (persistence).
 
 Responsibilities:
@@ -23,7 +23,7 @@ from .schema import SUPPORTED_ASSETS, AgentAction, MarketState, Transaction
 class MarketEngine:
     """
     The main engine driving the market logic.
-    
+
     Attributes:
         ledger (Ledger): Handle to the database.
         order_books (Dict[str, OrderBook]): One matching engine per supported asset.
@@ -34,27 +34,31 @@ class MarketEngine:
         self,
         db_path: str = "market.db",
         run_id: str | None = None,
-        initial_price: float = 0.005, # Default seed price in BTC
+        initial_price: float = 0.005,  # Default seed price in BTC
     ):
         """
         Initialize the market engine.
-        
+
         Args:
             db_path (str): Path to the SQLite database file.
         """
         self.ledger = Ledger(db_path)
-        
+
         # Use a single OrderBook instance for all assets (Phase 3 refactor)
         self.order_book = OrderBook()
-        
-        if not isinstance(initial_price, (int, float)) or not math.isfinite(initial_price) or initial_price <= 0:
+
+        if (
+            not isinstance(initial_price, (int, float))
+            or not math.isfinite(initial_price)
+            or initial_price <= 0
+        ):
             initial_price = 0.005
-            
+
         # Initialize prices for all assets
         self.current_prices: dict[str, float] = {
             asset: float(initial_price) for asset in SUPPORTED_ASSETS
         }
-        
+
         self.total_volume = 0
         self.price_history: dict[str, list[float]] = {
             asset: [float(initial_price)] for asset in SUPPORTED_ASSETS
@@ -67,69 +71,78 @@ class MarketEngine:
         """
         Calculate global sentiment based on total bid/ask counts across the order book.
         """
-        summary = self.order_book.get_summary() # Returns global aggregate if no item passed
+        summary = self.order_book.get_summary()  # Global aggregate if no item passed.
         total_bids = summary["bids_count"]
         total_asks = summary["asks_count"]
-        
+
         total = total_bids + total_asks
         bullish_pct = 50.0
         if total > 0:
             bullish_pct = (total_bids / total) * 100
-            
+
         label = "Neutral"
-        if bullish_pct > 85: label = "Super Bullish"
-        elif bullish_pct > 65: label = "Bullish"
-        elif bullish_pct < 15: label = "Super Bearish"
-        elif bullish_pct < 35: label = "Bearish"
-        
+        if bullish_pct > 85:
+            label = "Super Bullish"
+        elif bullish_pct > 65:
+            label = "Bullish"
+        elif bullish_pct < 15:
+            label = "Super Bearish"
+        elif bullish_pct < 35:
+            label = "Bearish"
+
         return {
             "bullish_pct": round(bullish_pct, 1),
-            "label": label
+            "label": label,
         }
 
     def get_state(self, item: str = "AAPL") -> MarketState:
         """
         Constructs and returns the current state of the market for a specific asset.
-        
+
         This is the "sensor" data provided to agents.
-        
+
         Args:
             item (str): The ticker symbol to query.
-            
+
         Returns:
             MarketState: Object containing price and order book summary.
         """
         # Fallback for invalid items
         target_item = item if item in SUPPORTED_ASSETS else SUPPORTED_ASSETS[0]
-        
+
         summary = self.order_book.get_summary(target_item)
         return MarketState(
-            current_price=self.current_prices.get(target_item, 0.0),
-            order_book_summary=summary
+            current_price=self.current_prices.get(target_item, 0.0), order_book_summary=summary
         )
 
-    def process_action(self, agent: Any, action: AgentAction, item: str, price: float = 0.0) -> Transaction | None:
+    def process_action(
+        self,
+        agent: Any,
+        action: AgentAction,
+        item: str,
+        price: float = 0.0,
+    ) -> Transaction | None:
         """
         Processes an action submitted by an agent.
-        
+
         This method acts as the central transaction coordinator. It:
         1. Validates the input arguments.
         2. Routes the order to the single `OrderBook`.
         3. If a match occurs, it validates the trade against the agent's `Portfolio`.
         4. If valid, records the transaction in the `Ledger`.
-        
+
         Args:
-            agent (BaseAgent): The agent instance submitting the action. 
+            agent (BaseAgent): The agent instance submitting the action.
                                Must have a `portfolio` attribute.
             action (AgentAction): The type of action (BUY, SELL, HOLD, REFLECTION).
             item (str): The asset involved (e.g. "AAPL", "TSLA").
             price (float): The limit price for the order (in BTC).
-            
+
         Returns:
             Optional[Transaction]: The resulting transaction if a trade occurred, else None.
         """
         transaction = None
-        
+
         # HOLD or REFLECTION actions have no market impact
         if action in (AgentAction.HOLD, AgentAction.REFLECTION):
             return None
@@ -144,16 +157,16 @@ class MarketEngine:
 
         if action == AgentAction.BUY:
             transaction = self.order_book.add_buy(agent.id, item, float(price))
-            
+
             # If trade matched, execute against portfolio
             if transaction:
                 # Portfolio validation: Check if agent has enough BTC
                 success = agent.portfolio.execute_buy(
                     item=transaction.item,
                     quantity=1,  # TODO: Support variable quantities
-                    price=transaction.price
+                    price=transaction.price,
                 )
-                
+
                 if not success:
                     # CONCEPTUAL FIX: Re-insert the popped order back into the book
                     # transaction.seller_id (maker) had their order popped
@@ -161,22 +174,20 @@ class MarketEngine:
                         agent_id=transaction.seller_id,
                         item=transaction.item,
                         price=transaction.price,
-                        is_buy=False  # Re-insert as ask
+                        is_buy=False,  # Re-insert as ask
                     )
                     return None
-                    
+
         elif action == AgentAction.SELL:
             transaction = self.order_book.add_sell(agent.id, item, float(price))
-            
+
             # If trade matched, execute against portfolio
             if transaction:
                 # Portfolio validation: Check if agent has the asset
                 success = agent.portfolio.execute_sell(
-                    item=transaction.item,
-                    quantity=1,
-                    price=transaction.price
+                    item=transaction.item, quantity=1, price=transaction.price
                 )
-                
+
                 if not success:
                     # CONCEPTUAL FIX: Re-insert the popped order back into the book
                     # transaction.buyer_id (maker) had their order popped
@@ -184,7 +195,7 @@ class MarketEngine:
                         agent_id=transaction.buyer_id,
                         item=transaction.item,
                         price=transaction.price,
-                        is_buy=True  # Re-insert as bid
+                        is_buy=True,  # Re-insert as bid
                     )
                     return None
         else:
@@ -197,14 +208,14 @@ class MarketEngine:
             # 1. Persist to DB
             self.ledger.record_transaction(transaction)
             self.last_transaction = transaction
-            
+
             # 2. Update Market State for this asset
             self.current_prices[item] = transaction.price
             self.total_volume += 1
             self.price_history[item].append(transaction.price)
             if len(self.price_history[item]) > 50:
                 self.price_history[item].pop(0)
-            
+
         return transaction
 
     def get_recent_transactions(self, limit: int = 100) -> list[Transaction]:
@@ -212,8 +223,6 @@ class MarketEngine:
 
     def get_latest_transaction(self) -> Transaction | None:
         return self.last_transaction
-        
-        return None
 
     def get_market_metrics(self) -> dict:
         """
@@ -221,7 +230,7 @@ class MarketEngine:
         """
         # Calculate volatility as average price deviation across all assets
         vol_ratios = []
-        for asset, prices in self.price_history.items():
+        for _asset, prices in self.price_history.items():
             if len(prices) < 2:
                 continue
             # Simple volatility: (max - min) / avg
@@ -229,27 +238,36 @@ class MarketEngine:
             if avg > 0:
                 vol = (max(prices) - min(prices)) / avg
                 vol_ratios.append(vol)
-        
+
         avg_vol = sum(vol_ratios) / len(vol_ratios) if vol_ratios else 0.0
-        
+
         vol_label = "Low"
-        if avg_vol > 0.15: vol_label = "Extreme"
-        elif avg_vol > 0.08: vol_label = "High"
-        elif avg_vol > 0.03: vol_label = "Medium"
-        
+        if avg_vol > 0.15:
+            vol_label = "Extreme"
+        elif avg_vol > 0.08:
+            vol_label = "High"
+        elif avg_vol > 0.03:
+            vol_label = "Medium"
+
         return {
             "total_volume": self.total_volume,
             "volatility": vol_label,
-            "volatility_index": round(avg_vol * 100, 2)
+            "volatility_index": round(avg_vol * 100, 2),
         }
 
-    def negotiate_price(self, agent_id: str, action: AgentAction, item: str, price: float) -> tuple[float, dict | None]:
+    def negotiate_price(
+        self,
+        agent_id: str,
+        action: AgentAction,
+        item: str,
+        price: float,
+    ) -> tuple[float, dict | None]:
         """
         Provides a counter-offer price based on current best quotes.
         """
         if item not in SUPPORTED_ASSETS:
             return price, None
-            
+
         best_bid, best_ask = self.order_book.get_best_quotes(item)
 
         if action == AgentAction.BUY and best_ask is not None and price < best_ask:

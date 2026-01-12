@@ -14,7 +14,12 @@ def _make_market_state():
     """Return a minimal MarketState with stable book values."""
     return MarketState(
         current_price=10.0,
-        order_book_summary={"best_bid": 9.0, "best_ask": 11.0, "bids_count": 1, "asks_count": 1}
+        order_book_summary={
+            "best_bid": 9.0,
+            "best_ask": 11.0,
+            "bids_count": 1,
+            "asks_count": 1,
+        },
     )
 
 
@@ -27,7 +32,9 @@ async def test_analyze_trend_rising_from_desc_order(mock_acompletion):
     async def _mock_acompletion(**kwargs):
         """Capture prompt content and return a fixed response."""
         captured["prompt"] = kwargs["messages"][0]["content"]
-        return MagicMock(choices=[MagicMock(message=MagicMock(content={"headline": "h", "body": "b"}))])
+        return MagicMock(
+            choices=[MagicMock(message=MagicMock(content={"headline": "h", "body": "b"}))]
+        )
 
     mock_acompletion.side_effect = _mock_acompletion
 

@@ -12,9 +12,10 @@ import time
 class AsyncRateLimiter:
     """
     A simple asynchronous rate limiter using a sliding window.
-    
+
     Ensures that requests do not exceed a certain number per time window.
     """
+
     def __init__(self, max_requests: int, window_seconds: float = 60.0):
         self.max_requests = max_requests
         self.window_seconds = window_seconds
@@ -30,22 +31,24 @@ class AsyncRateLimiter:
                 now = time.time()
                 # Remove timestamps outside the window
                 self.requests = [t for t in self.requests if now - t < self.window_seconds]
-                
+
                 if len(self.requests) < self.max_requests:
                     self.requests.append(now)
                     return
-                
+
                 # Wait for the oldest request to expire
                 sleep_time = self.window_seconds - (now - self.requests[0])
                 if sleep_time > 0:
                     await asyncio.sleep(sleep_time)
 
+
 class GlobalRateLimiter:
     """
     Singleton-style rate limiter to be shared across all agents.
     """
+
     _instance: AsyncRateLimiter | None = None
-    
+
     @classmethod
     def get_instance(cls, max_rpm: int = 30) -> AsyncRateLimiter:
         if cls._instance is None:

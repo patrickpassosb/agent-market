@@ -15,9 +15,9 @@ def test_websocket_connection():
             mock_sim.engine = MagicMock()
             mock_sim.engine.current_prices = {"AAPL": 150.0}
             mock_sim.latest_news = None
-            mock_sim.start = AsyncMock() # Ensure start is awaitable
+            mock_sim.start = AsyncMock()  # Ensure start is awaitable
             mock_sim.stop = AsyncMock()  # Ensure stop is awaitable
-            
+
             with TestClient(app, base_url="http://localhost") as client:
                 with client.websocket_connect("/ws", headers={"Host": "localhost"}) as websocket:
                     # The server sends a ticker update immediately upon connection
