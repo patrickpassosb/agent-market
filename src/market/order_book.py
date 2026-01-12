@@ -5,23 +5,25 @@ This module implements a standard Limit Order Book using binary heaps.
 It supports adding buy (bid) and sell (ask) orders and matching them efficiently.
 
 Matching Engine Logic:
-- **Price-Time Priority**: Better prices match first. If prices are equal, earlier orders match first.
+- **Price-Time Priority**: Better prices match first. If prices are equal, earlier orders
+  match first.
 - **Bids (Buys)**: Maintained in a MAX-Heap (highest price at root).
 - **Asks (Sells)**: Maintained in a MIN-Heap (lowest price at root).
 
-Python's `heapq` module implements a Min-Heap. 
+Python's `heapq` module implements a Min-Heap.
 To simulate a Max-Heap for bids, we negate the price before pushing to the heap.
 """
 
 import heapq
-from typing import Dict, List, Tuple, Optional
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+
 from .schema import Transaction
+
 
 class OrderBook:
     """
     In-memory Limit Order Book.
-    
+
     Attributes:
         bids (Dict[str, List]): Per-item heap of buy orders.
                                 Format: (-price, timestamp, agent_id)
@@ -31,41 +33,42 @@ class OrderBook:
     """
 
     def __init__(self):
-        # Buy orders: Max-heap per item (store negative price to simulate max-heap with python's min-heap)
-        self.bids: Dict[str, List[Tuple[float, float, str]]] = {}
+        """Initialize empty bid/ask heaps per item."""
+        # Buy orders: Max-heap per item (store negative price for min-heap).
+        self.bids: dict[str, list[tuple[float, float, str]]] = {}
         # Sell orders: Min-heap per item
-        self.asks: Dict[str, List[Tuple[float, float, str]]] = {}
+        self.asks: dict[str, list[tuple[float, float, str]]] = {}
 
-    def _get_bids(self, item: str) -> List[Tuple[float, float, str]]:
+    def _get_bids(self, item: str) -> list[tuple[float, float, str]]:
         """
-        Retrieve the bid heap for a specific item. 
+        Retrieve the bid heap for a specific item.
         Creates a new list if one doesn't exist.
-        
+
         Args:
             item (str): The asset identifier.
-            
+
         Returns:
             List: The heap list for bids on this item.
         """
         return self.bids.setdefault(item, [])
 
-    def _get_asks(self, item: str) -> List[Tuple[float, float, str]]:
+    def _get_asks(self, item: str) -> list[tuple[float, float, str]]:
         """
-        Retrieve the ask heap for a specific item. 
+        Retrieve the ask heap for a specific item.
         Creates a new list if one doesn't exist.
-        
+
         Args:
             item (str): The asset identifier.
-            
+
         Returns:
             List: The heap list for asks on this item.
         """
         return self.asks.setdefault(item, [])
 
-    def add_buy(self, agent_id: str, item: str, price: float) -> Optional[Transaction]:
+    def add_buy(self, agent_id: str, item: str, price: float) -> Transaction | None:
         """
         Processes a BUY order (Bid).
-        
+
         Logic:
         1. Check if there is a matching SELL order (Ask) with price <= Bid Price.
         2. If match found: Execute trade at the ASK price (Maker's price).
@@ -79,40 +82,41 @@ class OrderBook:
         Returns:
             Optional[Transaction]: A Transaction object if a trade executed, otherwise None.
         """
-        timestamp = datetime.now(timezone.utc).timestamp()  # https://github.com/python/cpython/blob/main/Doc/library/datetime.rst (Context7 /python/cpython)
-        
+        # Context7 /python/cpython (datetime docs).
+        timestamp = datetime.now(UTC).timestamp()
+
         # Check if we can match with existing sell orders (asks) for this item
         # Lowest ask is at asks[0] (Min-Heap Root)
         asks = self._get_asks(item)
         if asks:
             best_ask_price, ask_ts, seller_id = asks[0]
-            
+
             # If the lowest ask is cheap enough for the buyer
             if price >= best_ask_price:
                 # MATCH! Remove the ask from the book
                 heapq.heappop(asks)
-                
+
                 # Execution happens at the Maker's price (the one already in the book)
                 execution_price = best_ask_price
-                
+
                 return Transaction(
                     buyer_id=agent_id,
                     seller_id=seller_id,
                     item=item,
                     price=execution_price,
-                    timestamp=datetime.utcnow()
+                    timestamp=datetime.now(UTC),
                 )
-        
+
         # No match found, add to order book as a resting order
         # Push (-price) to simulate Max-Heap behavior with heapq
         bids = self._get_bids(item)
         heapq.heappush(bids, (-price, timestamp, agent_id))
         return None
 
-    def add_sell(self, agent_id: str, item: str, price: float) -> Optional[Transaction]:
+    def add_sell(self, agent_id: str, item: str, price: float) -> Transaction | None:
         """
         Processes a SELL order (Ask).
-        
+
         Logic:
         1. Check if there is a matching BUY order (Bid) with price >= Ask Price.
         2. If match found: Execute trade at the BID price (Maker's price).
@@ -126,42 +130,45 @@ class OrderBook:
         Returns:
             Optional[Transaction]: A Transaction object if a trade executed, otherwise None.
         """
-        timestamp = datetime.now(timezone.utc).timestamp()  # https://github.com/python/cpython/blob/main/Doc/library/datetime.rst (Context7 /python/cpython)
-        
+        # Context7 /python/cpython (datetime docs).
+        timestamp = datetime.now(UTC).timestamp()
+
         # Check if we can match with existing buy orders (bids) for this item
         # Highest bid is at bids[0] (stored as negative value)
         bids = self._get_bids(item)
         if bids:
             neg_best_bid_price, bid_ts, buyer_id = bids[0]
             best_bid_price = -neg_best_bid_price
-            
+
             # If the highest bid is high enough for the seller
             if best_bid_price >= price:
                 # MATCH! Remove the bid from the book
                 heapq.heappop(bids)
-                
+
                 # Execution happens at the Maker's price (the bid price)
                 execution_price = best_bid_price
-                
+
                 return Transaction(
                     buyer_id=buyer_id,
                     seller_id=agent_id,
                     item=item,
                     price=execution_price,
-                    timestamp=datetime.now(timezone.utc)
+                    timestamp=datetime.now(UTC),
                 )
-        
+
         # No match found, add to order book as a resting order
         asks = self._get_asks(item)
         heapq.heappush(asks, (price, timestamp, agent_id))
         return None
 
-    def get_summary(self) -> dict:
+    def get_summary(self, item: str | None = None) -> dict:
         """
         Returns a simplified summary of the current order book state.
-        
-        Useful for public feeds or agent observation.
-        
+
+        Args:
+            item (Optional[str]): If provided, returns summary for this asset only.
+                                 Otherwise, returns an aggregate summary.
+
         Returns:
             dict: {
                 "best_bid": float | None,
@@ -170,6 +177,19 @@ class OrderBook:
                 "asks_count": int
             }
         """
+        if item:
+            bids = self.bids.get(item, [])
+            asks = self.asks.get(item, [])
+            best_bid = -bids[0][0] if bids else None
+            best_ask = asks[0][0] if asks else None
+            return {
+                "best_bid": best_bid,
+                "best_ask": best_ask,
+                "bids_count": len(bids),
+                "asks_count": len(asks),
+            }
+
+        # Global aggregation (fallback)
         best_bid = None
         for heap in self.bids.values():
             if not heap:
@@ -185,15 +205,15 @@ class OrderBook:
             price = heap[0][0]
             if best_ask is None or price < best_ask:
                 best_ask = price
-        
+
         return {
             "best_bid": best_bid,
             "best_ask": best_ask,
             "bids_count": sum(len(heap) for heap in self.bids.values()),
-            "asks_count": sum(len(heap) for heap in self.asks.values())
+            "asks_count": sum(len(heap) for heap in self.asks.values()),
         }
 
-    def get_best_quotes(self, item: str) -> tuple[Optional[float], Optional[float]]:
+    def get_best_quotes(self, item: str) -> tuple[float | None, float | None]:
         """
         Returns the best bid and ask for a specific item.
         """
@@ -202,3 +222,20 @@ class OrderBook:
         best_bid = -bids[0][0] if bids else None
         best_ask = asks[0][0] if asks else None
         return best_bid, best_ask
+
+    def reinsert_order(
+        self,
+        agent_id: str,
+        item: str,
+        price: float,
+        is_buy: bool,
+    ):
+        """
+        Puts an order back onto the book (e.g., if a match occurred but taker failed).
+        Note: This doesn't preserve exact original timestamp but prevents order loss.
+        """
+        timestamp = datetime.now(UTC).timestamp()
+        if is_buy:
+            heapq.heappush(self._get_bids(item), (-float(price), timestamp, agent_id))
+        else:
+            heapq.heappush(self._get_asks(item), (float(price), timestamp, agent_id))

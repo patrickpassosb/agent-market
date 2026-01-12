@@ -4,53 +4,45 @@ Post-run report generation for marketplace simulations.
 
 from __future__ import annotations
 
-from typing import Any, Iterable, Optional
 import argparse
 import json
+import math
 import os
-from datetime import datetime, timezone
+from collections.abc import Iterable
+from datetime import UTC, datetime
+from typing import Any
 
 import pandas as pd
-import matplotlib.pyplot as plt
-from sqlmodel import Session, create_engine, select
 
-from src.market.schema import Transaction, InteractionLog, DEFAULT_ITEM
+from src.analysis.chart import generate_agent_performance_chart, generate_market_summary_plot
+from src.market.ledger import Ledger
 
 
 def _to_dataframe(items: Iterable[Any]) -> pd.DataFrame:
     """
     Convert a list of SQLModel/Pydantic objects into a DataFrame.
     """
-    data = [item.model_dump(mode="json") for item in items]  # https://docs.pydantic.dev/latest/api/base_model (Context7 /websites/pydantic_dev)
-    return pd.DataFrame(data)  # https://pandas.pydata.org/docs/user_guide/dsintro (Context7 /websites/pandas_pydata)
+    # Context7 /websites/pydantic_dev (BaseModel model_dump).
+    data = [item.model_dump(mode="json") for item in items]
+    # Context7 /websites/pandas_pydata (DataFrame intro).
+    return pd.DataFrame(data)
 
 
-def _load_transactions(db_path: str, run_id: Optional[str]) -> list[Transaction]:
-    engine = create_engine(f"sqlite:///{db_path}")
-    with Session(engine) as session:
-        statement = select(Transaction)
-        if run_id:
-            statement = statement.where(Transaction.run_id == run_id)
-        statement = statement.order_by(Transaction.timestamp.asc())
-        return list(session.exec(statement).all())
+def _format_optional_float(value: float | None, decimals: int = 6) -> str:
+    """Format optional floats safely for report output."""
+    if value is None or not math.isfinite(value):
+        return "n/a"
+    return f"{value:.{decimals}f}"
 
 
-def _load_interactions(db_path: str, run_id: Optional[str]) -> list[InteractionLog]:
-    engine = create_engine(f"sqlite:///{db_path}")
-    with Session(engine) as session:
-        statement = select(InteractionLog)
-        if run_id:
-            statement = statement.where(InteractionLog.run_id == run_id)
-        statement = statement.order_by(InteractionLog.timestamp.asc())
-        return list(session.exec(statement).all())
-
-
-def _write_plot(path: str, fig) -> None:
-    fig.savefig(path, dpi=200, bbox_inches="tight")  # https://github.com/matplotlib/matplotlib/blob/main/galleries/users_explain/figure/figure_intro.rst (Context7 /matplotlib/matplotlib)
-    plt.close(fig)
+def _format_price(value: float | None) -> str:
+    """Format optional prices with currency when available."""
+    formatted = _format_optional_float(value)
+    return f"{formatted} BTC" if formatted != "n/a" else "n/a"
 
 
 def _markdown_table(df: pd.DataFrame, columns: list[str]) -> str:
+    """Render a DataFrame subset as a Markdown table without pandas extras."""
     if df.empty:
         return "No data."
     subset = df[columns].fillna("")
@@ -60,10 +52,11 @@ def _markdown_table(df: pd.DataFrame, columns: list[str]) -> str:
     return "\n".join([headers, divider, *rows])
 
 
-def _build_agent_summary(agents: Iterable[Any], current_price: float) -> pd.DataFrame:
+def _build_agent_summary(agents: Iterable[Any], current_prices: dict[str, float]) -> pd.DataFrame:
+    """Compute per-agent portfolio metrics at the end of a run."""
     rows = []
     for agent in agents:
-        metrics = agent.portfolio.get_metrics({DEFAULT_ITEM: current_price})
+        metrics = agent.portfolio.get_metrics(current_prices)
         rows.append(
             {
                 "agent_id": agent.id,
@@ -76,13 +69,16 @@ def _build_agent_summary(agents: Iterable[Any], current_price: float) -> pd.Data
                 "trades_count": metrics["trades_count"],
             }
         )
-    df = pd.DataFrame(rows)  # https://pandas.pydata.org/docs/user_guide/dsintro (Context7 /websites/pandas_pydata)
+    # Context7 /websites/pandas_pydata (DataFrame intro).
+    df = pd.DataFrame(rows)
     if not df.empty:
-        df = df.sort_values(by="roi", ascending=False)  # https://pandas.pydata.org/docs/dev/user_guide/basics (Context7 /websites/pandas_pydata)
+        # Context7 /websites/pandas_pydata (sort_values basics).
+        df = df.sort_values(by="roi", ascending=False)
     return df
 
 
 def _build_trade_activity(tx_df: pd.DataFrame) -> pd.DataFrame:
+    """Aggregate trade counts per agent from transaction data."""
     if tx_df.empty:
         return pd.DataFrame(columns=["agent_id", "trade_count"])
     buyers = tx_df["buyer_id"].value_counts().rename("trade_count")
@@ -93,6 +89,7 @@ def _build_trade_activity(tx_df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _build_action_activity(interactions_df: pd.DataFrame) -> pd.DataFrame:
+    """Aggregate action counts per agent from interaction logs."""
     if interactions_df.empty:
         return pd.DataFrame(columns=["agent_id", "action_count"])
     actions = interactions_df[interactions_df["kind"] == "action"]
@@ -104,6 +101,7 @@ def _build_action_activity(interactions_df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _summarize_market(tx_df: pd.DataFrame) -> dict:
+    """Summarize market-level stats from transaction data."""
     if tx_df.empty:
         return {
             "total_trades": 0,
@@ -122,7 +120,9 @@ def _summarize_market(tx_df: pd.DataFrame) -> dict:
 
 
 def _ensure_dir(path: str) -> None:
-    os.makedirs(path, exist_ok=True)  # https://github.com/python/cpython/blob/main/Doc/faq/library.rst (Context7 /python/cpython)
+    """Create output directory if it does not exist."""
+    # Context7 /python/cpython (os.makedirs docs).
+    os.makedirs(path, exist_ok=True)
 
 
 def generate_report(
@@ -130,7 +130,7 @@ def generate_report(
     db_path: str,
     report_root: str,
     agents: Iterable[Any],
-    current_price: float,
+    current_prices: dict[str, float],
 ) -> str:
     """
     Generate a report for a single run. Returns report directory path.
@@ -138,43 +138,31 @@ def generate_report(
     report_dir = os.path.join(report_root, run_id)
     _ensure_dir(report_dir)
 
-    transactions = _load_transactions(db_path, run_id)
-    interactions = _load_interactions(db_path, run_id)
+    ledger = Ledger(db_path)
+    transactions = ledger.get_transactions_for_run(run_id)
+    interactions = ledger.get_interactions_for_run(run_id)
 
     tx_df = _to_dataframe(transactions)
     interactions_df = _to_dataframe(interactions)
 
-    agent_df = _build_agent_summary(agents, current_price)
+    agent_df = _build_agent_summary(agents, current_prices)
     trade_activity_df = _build_trade_activity(tx_df)
     action_activity_df = _build_action_activity(interactions_df)
     market_summary = _summarize_market(tx_df)
 
-    plot_paths = {}
-    if transactions:
-        fig, ax = plt.subplots(figsize=(10, 4))
-        times = [tx.timestamp for tx in transactions]
-        prices = [tx.price for tx in transactions]
-        ax.plot(times, prices, label="Trade Price")
-        ax.set_title("Price Over Time")
-        ax.set_xlabel("Time")
-        ax.set_ylabel("Price")
-        ax.grid(True, alpha=0.3)
-        ax.legend(loc="upper left")
-        price_path = os.path.join(report_dir, "price_history.png")
-        _write_plot(price_path, fig)
-        plot_paths["price_history"] = os.path.relpath(price_path, report_root)
+    plot_paths: dict[str, str] = {}
+    if not tx_df.empty:
+        price_plots = generate_market_summary_plot(tx_df, report_dir)
+        for key, path in price_plots.items():
+            plot_paths[key] = os.path.relpath(path, report_root)
 
     if not agent_df.empty:
-        fig, ax = plt.subplots(figsize=(10, 4))
-        ax.bar(agent_df["agent_id"], agent_df["roi"])
-        ax.set_title("ROI by Agent")
-        ax.set_xlabel("Agent")
-        ax.set_ylabel("ROI (%)")
-        ax.tick_params(axis="x", rotation=45)
-        ax.grid(True, axis="y", alpha=0.3)
-        roi_path = os.path.join(report_dir, "agent_roi.png")
-        _write_plot(roi_path, fig)
-        plot_paths["agent_roi"] = os.path.relpath(roi_path, report_root)
+        roi_path = generate_agent_performance_chart(
+            agent_df,
+            os.path.join(report_dir, "agent_roi.png"),
+        )
+        if roi_path:
+            plot_paths["agent_roi"] = os.path.relpath(roi_path, report_root)
 
     top_agent = agent_df.iloc[0]["agent_id"] if not agent_df.empty else None
     top_roi = float(agent_df.iloc[0]["roi"]) if not agent_df.empty else None
@@ -185,18 +173,34 @@ def generate_report(
     report_lines.append("## Market Summary")
     report_lines.append("")
     report_lines.append(f"- Total trades: {market_summary['total_trades']}")
-    report_lines.append(f"- Avg price: {market_summary['avg_price']}")
-    report_lines.append(f"- Min price: {market_summary['min_price']}")
-    report_lines.append(f"- Max price: {market_summary['max_price']}")
-    report_lines.append(f"- Volatility (std): {market_summary['volatility']}")
-    report_lines.append(f"- Top agent: {top_agent} (ROI {top_roi})")
+    report_lines.append(f"- Avg price: {_format_price(market_summary['avg_price'])}")
+    report_lines.append(f"- Min price: {_format_price(market_summary['min_price'])}")
+    report_lines.append(f"- Max price: {_format_price(market_summary['max_price'])}")
+    if top_agent and top_roi is not None and math.isfinite(top_roi):
+        top_agent_label = f"{top_agent} (ROI {_format_optional_float(top_roi, 1)}%)"
+    elif top_agent:
+        top_agent_label = top_agent
+    else:
+        top_agent_label = "n/a"
+    report_lines.append(f"- Top agent: {top_agent_label}")
     report_lines.append("")
 
-    if plot_paths.get("price_history"):
+    if plot_paths.get("all_assets"):
         report_lines.append("## Price History")
         report_lines.append("")
-        report_lines.append(f"![Price History]({plot_paths['price_history']})")
+        report_lines.append(f"![Price History]({plot_paths['all_assets']})")
         report_lines.append("")
+
+    asset_plots = {
+        key: path for key, path in plot_paths.items() if key not in {"all_assets", "agent_roi"}
+    }
+    if asset_plots:
+        report_lines.append("## Per-Asset Price History")
+        report_lines.append("")
+        for asset in sorted(asset_plots):
+            report_lines.append(f"### {asset}")
+            report_lines.append(f"![{asset} Price]({asset_plots[asset]})")
+            report_lines.append("")
 
     if not agent_df.empty:
         report_lines.append("## Agent Performance")
@@ -204,7 +208,16 @@ def generate_report(
         report_lines.append(
             _markdown_table(
                 agent_df,
-                ["agent_id", "persona", "model", "cash", "portfolio_value", "total_pnl", "roi", "trades_count"],
+                [
+                    "agent_id",
+                    "persona",
+                    "model",
+                    "cash",
+                    "portfolio_value",
+                    "total_pnl",
+                    "roi",
+                    "trades_count",
+                ],
             )
         )
         report_lines.append("")
@@ -238,7 +251,8 @@ def generate_report(
 
     summary = {
         "run_id": run_id,
-        "generated_at": datetime.now(timezone.utc).isoformat(),  # https://github.com/python/cpython/blob/main/Doc/library/datetime.rst (Context7 /python/cpython)
+        # Context7 /python/cpython (datetime docs).
+        "generated_at": datetime.now(UTC).isoformat(),
         "total_trades": market_summary["total_trades"],
         "top_agent": top_agent,
         "top_roi": top_roi,
@@ -249,21 +263,29 @@ def generate_report(
 
 
 def _update_index(report_root: str, summary: dict) -> None:
+    """Update JSON and Markdown indices for report summaries."""
     index_json = os.path.join(report_root, "index.json")
     entries = []
     if os.path.exists(index_json):
-        with open(index_json, "r", encoding="utf-8") as handle:
+        with open(index_json, encoding="utf-8") as handle:
             entries = json.load(handle)
     entries = [e for e in entries if e.get("run_id") != summary["run_id"]]
     entries.append(summary)
     entries.sort(key=lambda x: x.get("run_id", ""), reverse=True)
     with open(index_json, "w", encoding="utf-8") as handle:
-        json.dump(entries, handle, indent=2, sort_keys=True)  # https://github.com/python/cpython/blob/main/Doc/library/json.rst (Context7 /python/cpython)
+        # Context7 /python/cpython (json docs).
+        json.dump(entries, handle, indent=2, sort_keys=True)
 
     index_lines = ["# Reports Index", ""]
     if entries:
-        df = pd.DataFrame(entries)  # https://pandas.pydata.org/docs/user_guide/dsintro (Context7 /websites/pandas_pydata)
-        index_lines.append(_markdown_table(df, ["run_id", "total_trades", "top_agent", "top_roi", "report_path"]))
+        # Context7 /websites/pandas_pydata (DataFrame intro).
+        df = pd.DataFrame(entries)
+        index_lines.append(
+            _markdown_table(
+                df,
+                ["run_id", "total_trades", "top_agent", "top_roi", "report_path"],
+            )
+        )
     else:
         index_lines.append("No reports found.")
 
@@ -273,10 +295,11 @@ def _update_index(report_root: str, summary: dict) -> None:
 
 
 def parse_args():
+    """Parse CLI args for report generation."""
     parser = argparse.ArgumentParser(
         description="Generate a post-run report",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )  # https://github.com/python/cpython/blob/main/Doc/library/argparse.rst (Context7 /python/cpython)
+    )  # Context7 /python/cpython (argparse docs).
     parser.add_argument("--run-id", required=True, help="Simulation run identifier")
     parser.add_argument("--db-path", default="market.db", help="SQLite DB path")
     parser.add_argument("--report-root", default="reports", help="Reports directory")
@@ -284,8 +307,9 @@ def parse_args():
 
 
 def main():
+    """CLI entry point for manual report generation."""
     args = parse_args()
-    generate_report(args.run_id, args.db_path, args.report_root, agents=[], current_price=0.0)
+    generate_report(args.run_id, args.db_path, args.report_root, agents=[], current_prices={})
 
 
 if __name__ == "__main__":

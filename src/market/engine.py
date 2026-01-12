@@ -2,133 +2,201 @@
 Market Engine (Facade).
 
 This module serves as the central controller for the market simulation.
-It follows the **Facade Pattern**, providing a simplified interface to the 
+It follows the **Facade Pattern**, providing a simplified interface to the
 complex underlying subsystems: the OrderBook (matching) and the Ledger (persistence).
 
 Responsibilities:
-1. Maintain the current state of the market (Last Price).
-2. Route agent actions to the Order Book.
+1. Maintain the current state of the market (Last Price) for each asset.
+2. Route agent actions to the correct Order Book (AAPL, TSLA, etc.).
 3. Record successful trades in the Ledger.
 4. Expose market state to agents.
 """
 
-from typing import List, Any, Dict, Optional
 import math
-import math
-from datetime import datetime
+from typing import Any
 
 from .ledger import Ledger
 from .order_book import OrderBook
-from .schema import Transaction, AgentAction, MarketState, DEFAULT_ITEM
+from .schema import SUPPORTED_ASSETS, AgentAction, MarketState, Transaction
+
 
 class MarketEngine:
     """
     The main engine driving the market logic.
-    
+
     Attributes:
         ledger (Ledger): Handle to the database.
-        order_book (OrderBook): Handle to the in-memory matching engine.
-        last_price (float): The price of the most recent execution. Used as the "current market price".
+        order_books (Dict[str, OrderBook]): One matching engine per supported asset.
+        current_prices (Dict[str, float]): Last trade price for each asset (in BTC).
     """
 
     def __init__(
         self,
         db_path: str = "market.db",
-        run_id: Optional[str] = None,
-        initial_price: float = 100.0,
+        run_id: str | None = None,
+        initial_price: float = 0.005,  # Default seed price in BTC
     ):
         """
         Initialize the market engine.
-        
+
         Args:
             db_path (str): Path to the SQLite database file.
         """
         self.ledger = Ledger(db_path)
-        self.order_book = OrderBook()
-        if not isinstance(initial_price, (int, float)) or not math.isfinite(initial_price) or initial_price <= 0:
-            initial_price = 100.0  # Guard against invalid seeds per https://github.com/python/cpython/blob/main/Doc/library/math.rst (Context7 /python/cpython)
-        self.last_price = float(initial_price)
-        self.run_id = run_id
 
-    def get_state(self) -> MarketState:
+        # Use a single OrderBook instance for all assets (Phase 3 refactor)
+        self.order_book = OrderBook()
+
+        if (
+            not isinstance(initial_price, (int, float))
+            or not math.isfinite(initial_price)
+            or initial_price <= 0
+        ):
+            initial_price = 0.005
+
+        # Initialize prices for all assets
+        self.current_prices: dict[str, float] = {
+            asset: float(initial_price) for asset in SUPPORTED_ASSETS
+        }
+
+        self.total_volume = 0
+        self.price_history: dict[str, list[float]] = {
+            asset: [float(initial_price)] for asset in SUPPORTED_ASSETS
+        }
+
+        self.run_id = run_id
+        self.last_transaction: Transaction | None = None
+
+    def get_global_sentiment(self) -> dict:
         """
-        Constructs and returns the current state of the market.
-        
+        Calculate global sentiment based on total bid/ask counts across the order book.
+        """
+        summary = self.order_book.get_summary()  # Global aggregate if no item passed.
+        total_bids = summary["bids_count"]
+        total_asks = summary["asks_count"]
+
+        total = total_bids + total_asks
+        bullish_pct = 50.0
+        if total > 0:
+            bullish_pct = (total_bids / total) * 100
+
+        label = "Neutral"
+        if bullish_pct > 85:
+            label = "Super Bullish"
+        elif bullish_pct > 65:
+            label = "Bullish"
+        elif bullish_pct < 15:
+            label = "Super Bearish"
+        elif bullish_pct < 35:
+            label = "Bearish"
+
+        return {
+            "bullish_pct": round(bullish_pct, 1),
+            "label": label,
+        }
+
+    def get_state(self, item: str = "AAPL") -> MarketState:
+        """
+        Constructs and returns the current state of the market for a specific asset.
+
         This is the "sensor" data provided to agents.
-        
+
+        Args:
+            item (str): The ticker symbol to query.
+
         Returns:
             MarketState: Object containing price and order book summary.
         """
-        summary = self.order_book.get_summary()
+        # Fallback for invalid items
+        target_item = item if item in SUPPORTED_ASSETS else SUPPORTED_ASSETS[0]
+
+        summary = self.order_book.get_summary(target_item)
         return MarketState(
-            current_price=self.last_price,
-            order_book_summary=summary
+            current_price=self.current_prices.get(target_item, 0.0), order_book_summary=summary
         )
 
-    def process_action(self, agent: Any, action: AgentAction, item: str = DEFAULT_ITEM, price: float = 0.0) -> Optional[Transaction]:
+    def process_action(
+        self,
+        agent: Any,
+        action: AgentAction,
+        item: str,
+        price: float = 0.0,
+    ) -> Transaction | None:
         """
         Processes an action submitted by an agent.
-        
+
         This method acts as the central transaction coordinator. It:
         1. Validates the input arguments.
-        2. Routes the order to the `OrderBook`.
+        2. Routes the order to the single `OrderBook`.
         3. If a match occurs, it validates the trade against the agent's `Portfolio`.
         4. If valid, records the transaction in the `Ledger`.
-        
+
         Args:
-            agent (BaseAgent): The agent instance submitting the action. 
+            agent (BaseAgent): The agent instance submitting the action.
                                Must have a `portfolio` attribute.
             action (AgentAction): The type of action (BUY, SELL, HOLD, REFLECTION).
-            item (str): The asset involved (default `DEFAULT_ITEM`).
-            price (float): The limit price for the order.
-            
+            item (str): The asset involved (e.g. "AAPL", "TSLA").
+            price (float): The limit price for the order (in BTC).
+
         Returns:
             Optional[Transaction]: The resulting transaction if a trade occurred, else None.
         """
         transaction = None
-        
+
         # HOLD or REFLECTION actions have no market impact
         if action in (AgentAction.HOLD, AgentAction.REFLECTION):
             return None
 
-        if not isinstance(item, str) or not item.strip():
+        # Validate Item
+        if not isinstance(item, str) or item not in SUPPORTED_ASSETS:
             return None
 
+        # Validate Price
         if not isinstance(price, (int, float)) or not math.isfinite(price) or price <= 0:
             return None
 
-        # Route action to the appropriate OrderBook method
         if action == AgentAction.BUY:
             transaction = self.order_book.add_buy(agent.id, item, float(price))
-            
+
             # If trade matched, execute against portfolio
             if transaction:
-                # Portfolio validation: Check if agent has enough cash
+                # Portfolio validation: Check if agent has enough BTC
                 success = agent.portfolio.execute_buy(
                     item=transaction.item,
                     quantity=1,  # TODO: Support variable quantities
-                    price=transaction.price
+                    price=transaction.price,
                 )
-                
+
                 if not success:
-                    # Rollback: Insufficient funds, cancel the trade
-                    # In a real system we'd need to put the order back on the book
+                    # CONCEPTUAL FIX: Re-insert the popped order back into the book
+                    # transaction.seller_id (maker) had their order popped
+                    self.order_book.reinsert_order(
+                        agent_id=transaction.seller_id,
+                        item=transaction.item,
+                        price=transaction.price,
+                        is_buy=False,  # Re-insert as ask
+                    )
                     return None
-                    
+
         elif action == AgentAction.SELL:
             transaction = self.order_book.add_sell(agent.id, item, float(price))
-            
+
             # If trade matched, execute against portfolio
             if transaction:
                 # Portfolio validation: Check if agent has the asset
                 success = agent.portfolio.execute_sell(
-                    item=transaction.item,
-                    quantity=1,
-                    price=transaction.price
+                    item=transaction.item, quantity=1, price=transaction.price
                 )
-                
+
                 if not success:
-                    # Rollback: Insufficient inventory
+                    # CONCEPTUAL FIX: Re-insert the popped order back into the book
+                    # transaction.buyer_id (maker) had their order popped
+                    self.order_book.reinsert_order(
+                        agent_id=transaction.buyer_id,
+                        item=transaction.item,
+                        price=transaction.price,
+                        is_buy=True,  # Re-insert as bid
+                    )
                     return None
         else:
             return None
@@ -139,18 +207,67 @@ class MarketEngine:
                 transaction.run_id = self.run_id
             # 1. Persist to DB
             self.ledger.record_transaction(transaction)
-            
-            # 2. Update Market State
-            self.last_price = transaction.price
-            
-            return transaction
-        
-        return None
+            self.last_transaction = transaction
 
-    def negotiate_price(self, agent_id: str, action: AgentAction, item: str, price: float) -> tuple[float, Optional[dict]]:
+            # 2. Update Market State for this asset
+            self.current_prices[item] = transaction.price
+            self.total_volume += 1
+            self.price_history[item].append(transaction.price)
+            if len(self.price_history[item]) > 50:
+                self.price_history[item].pop(0)
+
+        return transaction
+
+    def get_recent_transactions(self, limit: int = 100) -> list[Transaction]:
+        return self.ledger.get_transactions(limit=limit)
+
+    def get_latest_transaction(self) -> Transaction | None:
+        return self.last_transaction
+
+    def get_market_metrics(self) -> dict:
+        """
+        Calculate global market metrics like volume and volatility.
+        """
+        # Calculate volatility as average price deviation across all assets
+        vol_ratios = []
+        for _asset, prices in self.price_history.items():
+            if len(prices) < 2:
+                continue
+            # Simple volatility: (max - min) / avg
+            avg = sum(prices) / len(prices)
+            if avg > 0:
+                vol = (max(prices) - min(prices)) / avg
+                vol_ratios.append(vol)
+
+        avg_vol = sum(vol_ratios) / len(vol_ratios) if vol_ratios else 0.0
+
+        vol_label = "Low"
+        if avg_vol > 0.15:
+            vol_label = "Extreme"
+        elif avg_vol > 0.08:
+            vol_label = "High"
+        elif avg_vol > 0.03:
+            vol_label = "Medium"
+
+        return {
+            "total_volume": self.total_volume,
+            "volatility": vol_label,
+            "volatility_index": round(avg_vol * 100, 2),
+        }
+
+    def negotiate_price(
+        self,
+        agent_id: str,
+        action: AgentAction,
+        item: str,
+        price: float,
+    ) -> tuple[float, dict | None]:
         """
         Provides a counter-offer price based on current best quotes.
         """
+        if item not in SUPPORTED_ASSETS:
+            return price, None
+
         best_bid, best_ask = self.order_book.get_best_quotes(item)
 
         if action == AgentAction.BUY and best_ask is not None and price < best_ask:

@@ -6,15 +6,16 @@ It enforces a standard interface (`act`) that the simulation loop relies on.
 """
 
 from abc import ABC, abstractmethod
-from typing import Optional
-from src.market.schema import MarketState, AgentAction, Transaction
-from src.memory.memory import AgentMemory
+
 from src.agents.portfolio import Portfolio
+from src.market.schema import MarketState
+from src.memory.memory import AgentMemory
+
 
 class BaseAgent(ABC):
     """
     Abstract base class for all trading agents.
-    
+
     Defines the common interface and shared utilities for agents in the simulation.
     All agents have:
     - A unique ID
@@ -37,15 +38,15 @@ class BaseAgent(ABC):
         self.portfolio = Portfolio()
 
     @abstractmethod
-    def act(self, market_state: MarketState) -> Optional[dict]:
+    async def act(self, market_state: MarketState) -> dict | None:
         """
         The core decision-making method.
-        
+
         Must be implemented by subclasses.
-        
+
         Args:
             market_state (MarketState): The current view of the market.
-            
+
         Returns:
             Optional[dict]: A dictionary containing the decision keys:
                             - action (AgentAction)
@@ -59,7 +60,7 @@ class BaseAgent(ABC):
     def remember(self, text: str):
         """
         Stores a text string into the agent's long-term memory.
-        
+
         Args:
             text (str): The fact, observation, or thought to remember.
         """

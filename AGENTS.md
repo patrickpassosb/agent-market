@@ -66,17 +66,7 @@ Prefer durable fixes over symptom-masking:
 
 ---
 
-## 5) Token Discipline (Hard Rule)
-
-Agent MUST minimize tokens:
-
-* Be concise; avoid repetition, filler, or long explanations unless requested.
-* Prefer checklists, diffs, and direct steps.
-* Only expand details when needed to execute correctly.
-
----
-
-## 6) Task Reuse & Modification Policy
+## 5) Task Reuse & Modification Policy
 
 - If an existing task fully or partially covers the current request, Agent MUST reuse it.
 - If the task is mostly correct but incomplete or outdated, Agent- MUST update the existing task.

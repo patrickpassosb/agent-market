@@ -5,17 +5,18 @@ This module handles the permanent storage of market transactions using SQLModel.
 It abstracts the database connection and session management.
 """
 
-from typing import List, Optional
 import logging
-from sqlmodel import SQLModel, Session, create_engine, select
-import os
 import sqlite3
-from .schema import Transaction, InteractionLog
+
+from sqlmodel import Session, SQLModel, create_engine, select
+
+from .schema import InteractionLog, Transaction
+
 
 class Ledger:
     """
     Manages database interactions for market transactions.
-    
+
     Attributes:
         engine (Engine): SQLAlchemy Engine instance connected to the SQLite database.
     """
@@ -23,14 +24,17 @@ class Ledger:
     def __init__(self, db_path: str = "market.db"):
         """
         Initialize the Ledger and the database connection.
-        
+
         Args:
             db_path (str): File path for the SQLite database.
         """
-        # connect_args={"check_same_thread": False} is required for SQLite when accessed 
+        # connect_args={"check_same_thread": False} is required for SQLite when accessed
         # from multiple threads (though our sim is currently single-threaded loop).
-        self.engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
-        
+        self.engine = create_engine(
+            f"sqlite:///{db_path}",
+            connect_args={"check_same_thread": False},
+        )
+
         # Initialize tables
         try:
             SQLModel.metadata.create_all(self.engine)
@@ -43,20 +47,29 @@ class Ledger:
         """
         Ensure run_id columns exist for backward-compatible migrations.
         """
+
         def ensure_column(cursor, table: str):
+            """Add run_id column to a table if it exists and lacks it."""
+            # Use fixed table names from a whitelist to be absolutely sure
+            if table not in ["transaction", "interactionlog"]:
+                return
+
             cursor.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
                 (table,),
             )
             if cursor.fetchone() is None:
                 return
-            cursor.execute(f'PRAGMA table_info("{table}")')
+
+            # PRAGMA doesn't support parameters, so we use the whitelisted 'table' variable
+            cursor.execute(f"PRAGMA table_info({table})")
             columns = {row[1] for row in cursor.fetchall()}
             if "run_id" not in columns:
-                cursor.execute(f'ALTER TABLE "{table}" ADD COLUMN run_id TEXT')
+                cursor.execute(f"ALTER TABLE {table} ADD COLUMN run_id TEXT")
 
         try:
-            with sqlite3.connect(db_path) as conn:  # https://github.com/python/cpython/blob/main/Doc/library/sqlite3.rst (Context7 /python/cpython)
+            # Context7 /python/cpython (sqlite3 docs).
+            with sqlite3.connect(db_path) as conn:
                 cursor = conn.cursor()
                 ensure_column(cursor, "transaction")
                 ensure_column(cursor, "interactionlog")
@@ -68,31 +81,42 @@ class Ledger:
     def record_transaction(self, transaction: Transaction) -> Transaction:
         """
         Persists a completed transaction to the database.
-        
+
         Args:
             transaction (Transaction): The transaction object to save.
-            
+
         Returns:
             Transaction: The refreshed transaction object (with assigned ID).
         """
         with Session(self.engine) as session:
             session.add(transaction)
             session.commit()
-            session.refresh(transaction) # Refresh to get the auto-generated ID
+            session.refresh(transaction)  # Refresh to get the auto-generated ID
             return transaction
 
-    def get_transactions(self, limit: int = 100) -> List[Transaction]:
+    def get_transactions(self, limit: int = 100) -> list[Transaction]:
         """
         Retrieves the most recent transactions from the ledger.
-        
+
         Args:
             limit (int): Maximum number of records to return.
-            
+
         Returns:
             List[Transaction]: List of transaction objects, sorted by newest first.
         """
         with Session(self.engine) as session:
             statement = select(Transaction).order_by(Transaction.timestamp.desc()).limit(limit)
+            return list(session.exec(statement).all())
+
+    def get_transactions_for_run(self, run_id: str | None) -> list[Transaction]:
+        """
+        Retrieves all transactions for a specific run, ordered by time ascending.
+        """
+        with Session(self.engine) as session:
+            statement = select(Transaction)
+            if run_id:
+                statement = statement.where(Transaction.run_id == run_id)
+            statement = statement.order_by(Transaction.timestamp.asc())
             return list(session.exec(statement).all())
 
     def record_interaction(self, interaction: InteractionLog) -> InteractionLog:
@@ -105,10 +129,23 @@ class Ledger:
             session.refresh(interaction)
             return interaction
 
-    def get_interactions(self, limit: int = 100) -> List[InteractionLog]:
+    def get_interactions(self, limit: int = 100) -> list[InteractionLog]:
         """
         Retrieves the most recent interaction logs.
         """
         with Session(self.engine) as session:
-            statement = select(InteractionLog).order_by(InteractionLog.timestamp.desc()).limit(limit)
+            statement = (
+                select(InteractionLog).order_by(InteractionLog.timestamp.desc()).limit(limit)
+            )
+            return list(session.exec(statement).all())
+
+    def get_interactions_for_run(self, run_id: str | None) -> list[InteractionLog]:
+        """
+        Retrieves all interactions for a specific run, ordered by time ascending.
+        """
+        with Session(self.engine) as session:
+            statement = select(InteractionLog)
+            if run_id:
+                statement = statement.where(InteractionLog.run_id == run_id)
+            statement = statement.order_by(InteractionLog.timestamp.asc())
             return list(session.exec(statement).all())
