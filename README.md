@@ -6,7 +6,7 @@ This repository implements the Multi-Agent Marketplace Simulation challenge by o
 
 - **Simulation Entry Point (`main.py`)**: Initializes the `MarketEngine`, invests agents with personas/models, and runs the main asyncio tick loop while streaming a Rich dashboard.
 - **Market Engine (`src/market/engine.py`)**: Facade pattern that routes actions to the `OrderBook`, negotiates counter-offers, and persists transactions via the `Ledger`.
-- **Agents (`src/agents/`)**: `Trader` agents generate decisions through `litellm`, consult `AgentMemory`, and store reasoning; `JournalistAgent` converts market state into human-friendly headlines.
+- **Agents (`src/agents/`)**: `Trader` agents use distinct personas per run, generate decisions through `litellm`, consult `AgentMemory`, and store reasoning; `JournalistAgent` converts market state into human-friendly headlines.
 - **Memory (`src/memory/memory.py`)**: Per-agent ChromaDB collection storing short textual memories for retrieval-augmented generation.
 - **API & Frontend (`src/api/server.py`, `frontend/`)**: FastAPI exposes REST/WebSocket endpoints while the Next.js dashboard polls `/state`, `/agents`, and streams `/ws`.
 - **Analysis (`src/analysis/`)**: Charts & reports transform ledger data into PNG evidence plus Markdown summaries for reviewers.
@@ -70,6 +70,18 @@ Control the simulation with CLI flags:
 - `--max-ticks`: limit tick count for reproducible runs.
 - `--checkpoint-every`: write JSON snapshots to `checkpoints/`.
 - `--report-dir`: output location for Markdown/PDF evidence.
+
+## Demo Guide
+
+1. Run a bounded simulation with checkpoints and a report:
+   ```bash
+   uv run python main.py --max-ticks 50 --checkpoint-every 10 --report
+   ```
+2. Verify evidence artifacts:
+   - `reports/<run_id>/report.md` with trade summary and charts.
+   - `checkpoints/` for JSON snapshots.
+   - `logs/simulation_<run_id>.log` for agent action traces.
+   - `market.db` for transaction and interaction tables.
 
 ### API Server + Dashboard
 

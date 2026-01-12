@@ -14,7 +14,7 @@ from src.agents.journalist import JournalistAgent
 from src.agents.trader import Trader
 from src.market.engine import MarketEngine
 from src.market.schema import SUPPORTED_ASSETS, InteractionLog
-from src.utils.personas import PERSONA_MAP, PersonaStrategy, get_model_for_persona
+from src.utils.personas import PERSONA_MAP, get_model_for_persona, select_strategies
 
 
 class SimulationRunner:
@@ -26,6 +26,7 @@ class SimulationRunner:
         self.running = False
         self.engine: MarketEngine | None = None
         self.agents: list[Trader] = []
+        self.agent_index: dict[str, Trader] = {}
         self.journalist: JournalistAgent | None = None
         self.task: asyncio.Task | None = None
         self.latest_logs: list[dict] = []
@@ -36,13 +37,6 @@ class SimulationRunner:
     # Context7 /python/cpython (secrets module).
     def _secure_choice(self, items: list[str]) -> str:
         return secrets.choice(items)
-
-    def _secure_choices(
-        self,
-        items: list[PersonaStrategy],
-        k: int,
-    ) -> list[PersonaStrategy]:
-        return [secrets.choice(items) for _ in range(k)]
 
     def _secure_shuffle(self, items: list[Trader]) -> None:
         remaining = list(items)
@@ -66,11 +60,7 @@ class SimulationRunner:
 
         # Spawn Agents using Enum-based personas (matching other agent's work)
         num_agents = 12
-        available_strategies = list(PersonaStrategy)
-        # Handle cases where num_agents > available_strategies by sampling with
-        # replacement if needed. Here we have 12 strategies, so use all 12 and
-        # then double up some.
-        selected_strategies = self._secure_choices(available_strategies, k=num_agents)
+        selected_strategies = select_strategies(num_agents)
         for i, strategy in enumerate(selected_strategies):
             agent_id = f"Agent_{i + 1}"
             persona_text = PERSONA_MAP[strategy]
@@ -80,6 +70,7 @@ class SimulationRunner:
             for asset in SUPPORTED_ASSETS:
                 agent.portfolio.seed_position(asset, 10, 0.005)
             self.agents.append(agent)
+        self.agent_index = {agent.id: agent for agent in self.agents}
 
         self.running = True
         self.task = asyncio.create_task(self._loop())
@@ -143,6 +134,34 @@ class SimulationRunner:
                     tx = self.engine.process_action(
                         agent, decision["action"], decision["item"], decision["price"]
                     )
+                    if tx:
+                        buyer_agent = self.agent_index.get(tx.buyer_id)
+                        seller_agent = self.agent_index.get(tx.seller_id)
+                        run_id = self.engine.run_id if self.engine else None
+                        if buyer_agent:
+                            buyer_agent.remember(
+                                f"Bought {tx.item} from {tx.seller_id} at {tx.price}.",
+                                metadata={
+                                    "kind": "trade",
+                                    "item": tx.item,
+                                    "action": "buy",
+                                    "price": tx.price,
+                                    "counterparty_id": tx.seller_id,
+                                    "run_id": run_id,
+                                },
+                            )
+                        if seller_agent:
+                            seller_agent.remember(
+                                f"Sold {tx.item} to {tx.buyer_id} at {tx.price}.",
+                                metadata={
+                                    "kind": "trade",
+                                    "item": tx.item,
+                                    "action": "sell",
+                                    "price": tx.price,
+                                    "counterparty_id": tx.buyer_id,
+                                    "run_id": run_id,
+                                },
+                            )
 
                     return {
                         "tick": self.tick_count,

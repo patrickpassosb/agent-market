@@ -174,8 +174,17 @@ class Trader(BaseAgent):
         # 1. Get portfolio context
         portfolio_metrics = self.portfolio.get_metrics(all_current_prices)
 
-        # 2. Retrieve relevant memories
-        recent_memories = self.memory.retrieve_memory("trading decision", n_results=3)
+        # 2. Retrieve relevant memories (item-scoped decisions/trades).
+        recent_memories = self.memory.retrieve_memory(
+            query=f"{focused_item} trade decision",
+            n_results=3,
+            where={
+                "$and": [
+                    {"item": {"$eq": focused_item}},
+                    {"kind": {"$in": ["decision", "trade"]}},
+                ]
+            },
+        )
         memory_context = (
             "\n".join(recent_memories) if recent_memories else "No past trades recorded."
         )
@@ -254,7 +263,13 @@ class Trader(BaseAgent):
             # prompts benefit from previous rationale.
             self.remember(
                 f"Decided to {decision.action} {decision.item} at {decision.price}: "
-                f"{decision.reasoning}"
+                f"{decision.reasoning}",
+                metadata={
+                    "kind": "decision",
+                    "item": decision.item,
+                    "action": decision.action,
+                    "price": decision.price,
+                },
             )
 
             # Convert string action to internal Enum

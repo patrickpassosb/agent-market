@@ -9,6 +9,7 @@ which is necessary for liquidity and price discovery.
 from __future__ import annotations
 
 import os
+import secrets
 from enum import Enum
 
 
@@ -170,6 +171,27 @@ OLLAMA_MODELS = {
 }
 
 _ROUND_ROBIN = {"strategic": 0, "analytical": 0, "rule": 0, "fast": 0}
+
+
+def _secure_shuffle(items: list[PersonaStrategy]) -> list[PersonaStrategy]:
+    remaining = list(items)
+    shuffled: list[PersonaStrategy] = []
+    while remaining:
+        pick = secrets.choice(remaining)
+        remaining.remove(pick)
+        shuffled.append(pick)
+    return shuffled
+
+
+def select_strategies(count: int) -> list[PersonaStrategy]:
+    """
+    Choose strategies with distinct coverage before sampling with replacement.
+    """
+    strategies = _secure_shuffle(list(PersonaStrategy))
+    if count <= len(strategies):
+        return strategies[:count]
+    extra = [secrets.choice(list(PersonaStrategy)) for _ in range(count - len(strategies))]
+    return strategies + extra
 
 
 def _available_models(tier: str) -> list[str]:
