@@ -64,6 +64,48 @@ def _transaction_to_dict(tx: Transaction | None) -> dict | None:
     }
 
 
+def _agent_to_dict(agent) -> dict:
+    return {
+        "id": agent.id,
+        "persona": agent.persona,
+        "model": agent.model_name,
+        "portfolio": agent.portfolio.get_metrics(sim.engine.current_prices) if sim.engine else None,
+    }
+
+
+def _build_agent_snapshot() -> list[dict]:
+    if not sim.engine or not isinstance(sim.agents, list):
+        return []
+    return [_agent_to_dict(agent) for agent in sim.agents]
+
+
+def _build_ticker_payload() -> dict | None:
+    if not sim.engine:
+        return None
+    prices = sim.engine.current_prices
+    data = dict(prices) if isinstance(prices, dict) else {}
+    sentiment = sim.engine.get_global_sentiment()
+    if not isinstance(sentiment, dict):
+        sentiment = None
+    metrics = sim.engine.get_market_metrics()
+    if not isinstance(metrics, dict):
+        metrics = None
+    latest_tx = sim.engine.get_latest_transaction()
+    latest_tx_payload = (
+        _transaction_to_dict(latest_tx) if isinstance(latest_tx, Transaction) else None
+    )
+    tick = sim.tick_count if isinstance(sim.tick_count, int) else 0
+    return {
+        "type": "ticker",
+        "data": data,
+        "sentiment": sentiment,
+        "metrics": metrics,
+        "tick": tick,
+        "latest_transaction": latest_tx_payload,
+        "agents": _build_agent_snapshot(),
+    }
+
+
 # --- Security Dependency ---
 
 
@@ -175,7 +217,7 @@ class ConnectionManager:
         """Send a dict payload to every connected WebSocket, pruning failures."""
         for connection in list(self.active_connections):
             try:
-                # Context7 (FastAPI Websockets): send_json supports structured payloads.
+                # Context7 /websites/fastapi_tiangolo (WebSocket send_json).
                 await connection.send_json(message)
             except Exception:
                 self.disconnect(connection)
@@ -194,19 +236,9 @@ async def broadcast_loop():
     last_news_tick = -1
     while True:
         if sim.running and sim.engine:
-            sentiment = sim.engine.get_global_sentiment()
-            metrics = sim.engine.get_market_metrics()
-            latest_tx = sim.engine.get_latest_transaction()
-            await manager.broadcast(
-                {
-                    "type": "ticker",
-                    "data": dict(sim.engine.current_prices),
-                    "sentiment": sentiment,
-                    "metrics": metrics,
-                    "tick": sim.tick_count,
-                    "latest_transaction": _transaction_to_dict(latest_tx),
-                }
-            )
+            payload = _build_ticker_payload()
+            if payload:
+                await manager.broadcast(payload)
             if sim.latest_news and sim.latest_news.get("tick", 0) > last_news_tick:
                 last_news_tick = sim.latest_news["tick"]
                 await manager.broadcast(
@@ -257,17 +289,7 @@ def get_agents():
     """
     Returns the roster of active agents, their persona, model, and live portfolio metrics.
     """
-    if not sim.agents:
-        return []
-    return [
-        {
-            "id": a.id,
-            "persona": a.persona,
-            "model": a.model_name,
-            "portfolio": a.portfolio.get_metrics(sim.engine.current_prices),
-        }
-        for a in sim.agents
-    ]
+    return _build_agent_snapshot()
 
 
 @app.websocket("/ws")
@@ -285,15 +307,10 @@ async def websocket_endpoint(websocket: WebSocket, api_key: str | None = None):
     await manager.connect(websocket)
     logger.debug("websocket %s connected", websocket.client)
     # Push an initial ticker snapshot so clients don't wait for the next broadcast.
-    if sim.engine:
-        data = dict(sim.engine.current_prices)
+    payload = _build_ticker_payload()
+    if payload:
         try:
-            await websocket.send_json(
-                {
-                    "type": "ticker",
-                    "data": data,
-                }
-            )
+            await websocket.send_json(payload)
             logger.debug("initial websocket payload sent to %s", websocket.client)
         except Exception as exc:
             logger.debug("initial websocket payload failed: %s", exc)

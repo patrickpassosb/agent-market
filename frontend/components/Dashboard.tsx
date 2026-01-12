@@ -1,5 +1,5 @@
 "use client";
-// Context7 (Next.js "use client" directive): https://github.com/vercel/next.js/blob/canary/docs/01-app/03-api-reference/01-directives/use-client.mdx
+// Context7 /vercel/next.js/v16.1.1 ("use client" directive).
 
 import { useEffect, useState } from "react";
 import MarketPulse from "./MarketPulse";
@@ -42,6 +42,7 @@ type AgentRecord = {
     total_value: number;
     pnl: number;
     pnl_percent: number;
+    roi: number;
   };
 };
 
@@ -61,7 +62,8 @@ const DEFAULT_TICKERS: TickerMap = {
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8000/ws";
-const API_KEY = process.env.NEXT_PUBLIC_API_KEY; // Context7: https://github.com/vercel/next.js/blob/canary/docs/01-app/02-guides/environment-variables.mdx
+// Context7 /vercel/next.js/v16.1.1 (environment variables).
+const API_KEY = process.env.NEXT_PUBLIC_API_KEY;
 const API_HEADERS = API_KEY ? { "X-API-Key": API_KEY } : undefined;
 const WS_URL_WITH_TOKEN = API_KEY
   ? `${WS_URL}${WS_URL.includes("?") ? "&" : "?"}token=${encodeURIComponent(API_KEY)}`
@@ -166,6 +168,8 @@ export default function Dashboard() {
     fetchData();
   }, []);
 
+  // React useEffect is used to sync this component with WebSocket updates.
+  // Context7 /websites/react_dev (useEffect hook docs).
   useEffect(() => {
     // Maintain a resilient WebSocket connection to stream live updates.
     let socket: WebSocket | null = null;
@@ -217,6 +221,9 @@ export default function Dashboard() {
             }
             if (payload.latest_transaction) {
               appendHistoryPoint(payload.latest_transaction);
+            }
+            if (Array.isArray(payload.agents)) {
+              setAgents(payload.agents);
             }
           }
           if (payload.type === "news") {

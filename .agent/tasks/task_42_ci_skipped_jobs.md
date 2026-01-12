@@ -12,7 +12,7 @@
 
 ### Goal Statement
 <!-- Write one paragraph explaining what you want to achieve and why it matters for your project -->
-**Goal:** Explain the CI failure/skip behavior and provide safe, documented Git steps to merge the current work into `main`.
+**Goal:** Explain the CI failure/skip behavior, fix the failing test caused by runner randomness changes, and provide safe Git steps to merge into `main`.
 
 ---
 
@@ -29,7 +29,7 @@
 
 ### Current State
 <!-- Describe what exists today - what's working, what's broken, what's missing -->
-Lint job (`lint-and-audit`) failed due to Ruff violations, causing downstream jobs to be skipped. `docker-verify` runs independently and completed. `deploy-production` is also gated on push events and `needs`.
+Lint job (`lint-and-audit`) failed due to Ruff violations, causing downstream jobs to be skipped. `docker-verify` runs independently and completed. `deploy-production` is also gated on push events and `needs`. CI now fails in `tests/test_runner.py` due to mocking `random` after switching to `secrets`-based helpers.
 
 ## 3. Context & Problem Definition
 
@@ -43,6 +43,7 @@ The Actions UI shows skipped jobs, and the user needs to know which dependency o
 - [ ] Explain why the failing lint job causes `test` (and `deploy`) to skip.
 - [ ] Call out any additional conditional (`if`) that prevents deploy on PRs.
 - [ ] Provide documented Git commands to update `main` and merge the current branch.
+- [ ] Fix `tests/test_runner.py` to align with secure-random helpers in `SimulationRunner`.
 
 ---
 

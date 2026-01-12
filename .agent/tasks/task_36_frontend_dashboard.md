@@ -8,11 +8,11 @@
 
 ### Task Title
 <!-- Give your task a clear, specific name that describes what you're building or fixing -->
-**Title:** Build Next.js Bloomberg-Style Dashboard Frontend
+**Title:** Improve Agent Roster Realtime Metrics + Persona Visibility
 
 ### Goal Statement
 <!-- Write one paragraph explaining what you want to achieve and why it matters for your project -->
-**Goal:** Stand up a Next.js 14 + Tailwind + lightweight-charts frontend in `frontend/` that renders a real-time market dashboard with WebSocket updates and a dark glassmorphism aesthetic, aligning with the backend API contract.
+**Goal:** Ensure agent total value and ROI update in real time and make agent personas clearly readable in the roster UI, while keeping the existing dashboard aesthetic and API contract.
 
 ---
 
@@ -20,7 +20,7 @@
 
 ### Technology & Architecture
 <!-- This is where you document your current tech stack so the AI understands your environment -->
-- **Frameworks & Versions:** Next.js 14 (new), Tailwind CSS (new), lightweight-charts (new)
+- **Frameworks & Versions:** Next.js 16, Tailwind CSS, lightweight-charts
 - **Language:** TypeScript (frontend)
 - **Database & ORM:** N/A (frontend)
 - **UI & Styling:** Tailwind CSS, custom UI components
@@ -29,20 +29,19 @@
 
 ### Current State
 <!-- Describe what exists today - what's working, what's broken, what's missing -->
-Backend exists separately. No frontend in this repo yet. Need to initialize and build dashboard UI + WebSocket integration.
+Frontend already exists with WebSocket market updates. Agent roster metrics are only refreshed on initial fetch, and persona text is truncated in cards.
 
 ## 3. Context & Problem Definition
 
 ### Problem Statement
 <!-- This is where you clearly define the specific problem you're solving -->
-There is no frontend UI to visualize the market simulation in real time. Users need a Bloomberg-terminal-style dashboard with live ticker updates, charts, and an agent activity feed that consumes the backend WebSocket and REST endpoints.
+Agent total value/ROI remains static after initial load, and persona text is truncated to a single line, making it hard to read. Users need real-time metric updates and clearer persona visibility.
 
 ### Success Criteria
 <!-- Define exactly how you'll know when this task is complete and successful -->
-- [x] `frontend/` Next.js 14 project scaffolding created with Tailwind configured
-- [x] Market Watch, Real-time Chart, and Agent Feed components render in a single dashboard page
-- [x] WebSocket at `ws://localhost:8000/ws` updates tickers and chart data
-- [x] UI uses dark glassmorphism aesthetic and is responsive
+- [x] Agent total value and ROI update in real time (WebSocket or polling).
+- [x] Persona text is readable without truncation blocking key info.
+- [x] UI remains aligned with the existing glassmorphism aesthetic.
 
 ---
 
@@ -77,10 +76,10 @@ There is no frontend UI to visualize the market simulation in real time. Users n
 
 ### Technical Constraints
 <!-- This is where you list limitations the AI agent must work within -->
-- Must use Next.js 14 App Router
+- Must use current Next.js App Router setup
 - Must use Tailwind CSS
 - Must use lightweight-charts for the chart
-- Must match backend message shape: `{ "type": "ticker", "data": { "AAPL": 0.005 } }`
+- Must preserve existing ticker message shape; can extend with agent roster payloads.
 
 ---
 
@@ -104,7 +103,7 @@ None.
 
 ### Data Access Pattern Rules
 <!-- This is where you tell the AI agent how to structure backend code in your project -->
-Frontend uses WebSocket for live updates and REST for initial state and agent list.
+Frontend uses WebSocket for live updates and REST for initial state and agent list; may extend WS payload to include agent metrics.
 
 ### Server Actions
 <!-- List the backend mutation operations you need -->
@@ -122,29 +121,27 @@ None.
 
 ### New Components
 <!-- This is where you specify UI components to be created -->
-- MarketWatch
-- RealtimeChart
-- AgentFeed
-- Layout shell / dashboard page
+- AgentRoster persona display (improve readability)
+- Dashboard WebSocket handling for live agent metrics
 
 ### Page Updates
 <!-- This is where you list pages that need modifications -->
-- `frontend/app/page.tsx` for dashboard layout
+- `frontend/components/AgentRoster.tsx`
+- `frontend/components/Dashboard.tsx`
+- `src/api/server.py` (optional: include agent roster in WS payload)
 
 ### State Management
 <!-- This is where you plan how data flows through your frontend -->
-Local component state with hooks; shared WebSocket state via context or lifted state in page.
+Local component state with hooks; update agent roster on WS tick events or controlled polling.
 
 ---
 
 ## 9. Implementation Plan
 
-1. Scaffold Next.js 14 app in `frontend/` with Tailwind and TypeScript.
-2. Add shared UI shell with glassmorphism theme and layout.
-3. Implement MarketWatch component and state wiring.
-4. Implement RealtimeChart with lightweight-charts and WebSocket stream.
-5. Implement AgentFeed with placeholder fetch (REST) and data types.
-6. Wire WebSocket and initial data fetch; ensure responsive design.
+1. Update backend WS payload or add frontend polling for agent roster metrics.
+2. Wire `Dashboard` to refresh agent metrics in real time.
+3. Improve persona visibility in `AgentRoster` (expandable or multi-line).
+4. Validate UI still fits within existing layout constraints.
 
 ---
 
@@ -152,18 +149,19 @@ Local component state with hooks; shared WebSocket state via context or lifted s
 
 ### Real-Time Progress Tracking
 <!-- This is where you tell the AI agent to update progress as work is completed -->
-Track progress by updating this task checklist as each phase completes.
+- [x] Include live agent snapshot data in WebSocket ticker payloads.
+- [x] Consume WebSocket agent updates in `Dashboard`.
+- [x] Improve persona readability with expandable details in `AgentRoster`.
+- [x] Remove persona toggle UI and render full persona text inline.
+- [x] Normalize agent card spacing and align total-value/footer blocks.
 
 ---
 
 ## 11. File Structure & Organization
 
-- `frontend/` (new Next.js app)
-- `frontend/app/page.tsx`
-- `frontend/components/MarketWatch.tsx`
-- `frontend/components/RealtimeChart.tsx`
-- `frontend/components/AgentFeed.tsx`
-- `frontend/styles/globals.css` or Tailwind base styles
+- `frontend/components/AgentRoster.tsx`
+- `frontend/components/Dashboard.tsx`
+- `src/api/server.py`
 
 ---
 
@@ -190,7 +188,7 @@ Type-safe components, minimal abstractions, Tailwind for styling.
 
 ### Impact Assessment
 <!-- This is where you think through broader consequences of your changes -->
-Low risk; new frontend only. Ensure WebSocket reconnect logic does not overload backend.
+Ensure added agent updates do not overload the WebSocket or UI rendering.
 
 ---
 

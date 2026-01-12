@@ -57,10 +57,11 @@ class TestSimulationRunner:
         # We want to test the logic inside the loop without running it forever
         # So we can manually trigger the logic or mock the sleep to exit
 
+        # Context7 /python/cpython (unittest.mock.patch docs).
         with (
             patch("asyncio.sleep", side_effect=asyncio.CancelledError),
-            patch("src.simulation.runner.random.shuffle"),
-            patch("src.simulation.runner.random.choice", return_value="AAPL"),
+            patch.object(runner, "_secure_shuffle"),
+            patch.object(runner, "_secure_choice", return_value="AAPL"),
         ):
             # Mock negotiate_price to return the same price
             mock_engine.negotiate_price.return_value = (1.1, None)
