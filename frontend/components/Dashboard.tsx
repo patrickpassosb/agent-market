@@ -1,7 +1,7 @@
 "use client";
 // Context7 /vercel/next.js/v16.1.1 ("use client" directive).
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import MarketPulse from "./MarketPulse";
 import RealtimeChart from "./RealtimeChart";
 import AgentRoster from "./AgentRoster";
@@ -95,6 +95,14 @@ const DEFAULT_SIM_CONFIG: SimulationConfig = {
   tick_duration: 2.0,
   model_provider_order: "cerebras,groq,gemini,openrouter,ollama",
 };
+// Context7: https://v3.tailwindcss.com/docs/hover-focus-and-other-states (hover/focus/disabled variants)
+// Context7: https://v3.tailwindcss.com/docs/appearance (appearance-none utility)
+const CONTROL_INPUT_CLASSES =
+  "h-9 rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-white/80 transition focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/40 hover:border-white/20 disabled:cursor-not-allowed disabled:opacity-60 appearance-none";
+const CONTROL_BUTTON_PRIMARY_CLASSES =
+  "rounded-full bg-primary px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-black transition-all duration-200 hover:-translate-y-0.5 hover:bg-primary/80 hover:shadow-[0_0_12px_rgba(20,252,195,0.35)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2 focus-visible:ring-offset-black/30 disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-white/40";
+const CONTROL_BUTTON_SECONDARY_CLASSES =
+  "rounded-full border border-white/10 bg-white/5 px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-white/70 transition-all duration-200 hover:-translate-y-0.5 hover:border-white/30 hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-2 focus-visible:ring-offset-black/30 disabled:cursor-not-allowed disabled:border-white/10 disabled:text-white/30";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8000/ws";
@@ -174,6 +182,8 @@ export default function Dashboard() {
   const [simReportDir, setSimReportDir] = useState<string | null>(null);
 
   const [priceHistory, setPriceHistory] = useState<Record<Ticker, ChartPoint[]>>(() => createEmptyHistory(DEFAULT_TICKERS));
+  // Context7: https://react.dev/reference/react/useRef (store mutable values without re-rendering)
+  const lastTickRef = useRef<number | null>(null);
 
   const [activeSymbol, setActiveSymbol] = useState<Ticker>("AAPL");
 
@@ -293,6 +303,31 @@ export default function Dashboard() {
       });
     };
 
+    const appendPriceSnapshot = (prices: TickerMap) => {
+      const now = Math.floor(Date.now() / 1000);
+      setPriceHistory((prev) => {
+        const next = { ...prev };
+        TICKERS.forEach((symbol) => {
+          const value = prices[symbol];
+          if (typeof value !== "number") {
+            return;
+          }
+          const series = next[symbol] ?? [];
+          const lastTime = series.length ? series[series.length - 1].time : -Infinity;
+          const point: ChartPoint = {
+            time: now <= lastTime ? lastTime + 1 : now,
+            value,
+          };
+          const updated = [...series, point];
+          if (updated.length > HISTORY_LIMIT) {
+            updated.shift();
+          }
+          next[symbol] = updated;
+        });
+        return next;
+      });
+    };
+
     const connect = () => {
       setStatus("connecting");
       socket = new WebSocket(WS_URL_WITH_TOKEN);
@@ -314,6 +349,13 @@ export default function Dashboard() {
             }
             if (typeof payload.tick === "number") {
               setTickCount(payload.tick);
+              const hasNewTick = payload.tick !== lastTickRef.current;
+              if (hasNewTick && !payload.latest_transaction) {
+                appendPriceSnapshot(payload.data);
+              }
+              if (hasNewTick) {
+                lastTickRef.current = payload.tick;
+              }
             }
             if (payload.latest_transaction) {
               appendHistoryPoint(payload.latest_transaction);
@@ -444,7 +486,7 @@ export default function Dashboard() {
                   value={simConfig.max_ticks}
                   disabled={simRunning}
                   onChange={(event) => setSimConfig(prev => ({ ...prev, max_ticks: Number(event.target.value) }))}
-                  className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-white/80"
+                  className={CONTROL_INPUT_CLASSES}
                 />
               </label>
               <label className="flex flex-col gap-1">
@@ -455,7 +497,7 @@ export default function Dashboard() {
                   value={simConfig.tick_duration}
                   disabled={simRunning}
                   onChange={(event) => setSimConfig(prev => ({ ...prev, tick_duration: Number(event.target.value) }))}
-                  className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-white/80"
+                  className={CONTROL_INPUT_CLASSES}
                 />
               </label>
               <label className="flex flex-col gap-1">
@@ -465,7 +507,7 @@ export default function Dashboard() {
                   value={simConfig.agent_count}
                   disabled={simRunning}
                   onChange={(event) => setSimConfig(prev => ({ ...prev, agent_count: Number(event.target.value) }))}
-                  className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-white/80"
+                  className={CONTROL_INPUT_CLASSES}
                 />
               </label>
               <label className="flex flex-col gap-1">
@@ -475,7 +517,7 @@ export default function Dashboard() {
                   value={simConfig.checkpoint_every}
                   disabled={simRunning}
                   onChange={(event) => setSimConfig(prev => ({ ...prev, checkpoint_every: Number(event.target.value) }))}
-                  className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-white/80"
+                  className={CONTROL_INPUT_CLASSES}
                 />
               </label>
               <label className="flex flex-col gap-1">
@@ -486,7 +528,7 @@ export default function Dashboard() {
                   value={simConfig.initial_price}
                   disabled={simRunning}
                   onChange={(event) => setSimConfig(prev => ({ ...prev, initial_price: Number(event.target.value) }))}
-                  className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-white/80"
+                  className={CONTROL_INPUT_CLASSES}
                 />
               </label>
               <label className="flex flex-col gap-1">
@@ -496,7 +538,7 @@ export default function Dashboard() {
                   value={simConfig.seed_inventory}
                   disabled={simRunning}
                   onChange={(event) => setSimConfig(prev => ({ ...prev, seed_inventory: Number(event.target.value) }))}
-                  className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-white/80"
+                  className={CONTROL_INPUT_CLASSES}
                 />
               </label>
             </div>
@@ -509,7 +551,7 @@ export default function Dashboard() {
                   value={simConfig.report_dir}
                   disabled={simRunning}
                   onChange={(event) => setSimConfig(prev => ({ ...prev, report_dir: event.target.value }))}
-                  className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-white/80"
+                  className={CONTROL_INPUT_CLASSES}
                 />
               </label>
               <label className="flex flex-col gap-1">
@@ -519,7 +561,7 @@ export default function Dashboard() {
                   value={simConfig.checkpoint_dir}
                   disabled={simRunning}
                   onChange={(event) => setSimConfig(prev => ({ ...prev, checkpoint_dir: event.target.value }))}
-                  className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-white/80"
+                  className={CONTROL_INPUT_CLASSES}
                 />
               </label>
             </div>
@@ -528,14 +570,14 @@ export default function Dashboard() {
               <button
                 onClick={startSimulation}
                 disabled={simRunning}
-                className="rounded-full bg-primary px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-black transition disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-white/40"
+                className={CONTROL_BUTTON_PRIMARY_CLASSES}
               >
                 Start Simulation
               </button>
               <button
                 onClick={stopSimulation}
                 disabled={!simRunning}
-                className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-white/70 transition disabled:cursor-not-allowed disabled:text-white/30"
+                className={CONTROL_BUTTON_SECONDARY_CLASSES}
               >
                 Stop Simulation
               </button>

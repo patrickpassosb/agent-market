@@ -38,6 +38,10 @@ The web/API simulation does not provide full parity with the terminal simulation
 - [x] Web/API flow supports checkpoint generation (configurable).
 - [x] Web/API flow exposes similar run metadata (run_id, ticks, summary metrics) for UI/logging.
 - [x] README documents how to access parity features in the web flow.
+- [x] Control deck inputs align visually with the dashboard design (no misaligned spinners).
+- [x] Start/Stop buttons have clear hover/focus feedback consistent with the UI theme.
+- [x] Start button hover shifts to a darker primary shade for clearer feedback.
+- [x] Market activity chart advances on live ticks even before the first trade.
 
 ---
 
@@ -110,6 +114,8 @@ No new UI required unless needed for parity controls.
 2) Add report generation hooks to web runner.
 3) Add checkpoint controls for web runner.
 4) Update README with web parity instructions.
+5) Refine control deck input styles to match the UI.
+6) Add hover/focus styles for Start/Stop buttons.
 
 ---
 
