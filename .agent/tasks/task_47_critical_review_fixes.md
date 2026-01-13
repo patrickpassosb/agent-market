@@ -27,11 +27,13 @@
 1.  **Security Vulnerability:** If the server is deployed without an `API_KEY`, it defaults to open access, potentially exposing the simulation to the public internet.
 2.  **Data Integrity Risk:** The "pop and re-insert" logic in `MarketEngine` breaks transaction atomicity. If an error occurs during re-insertion, the order is lost (user loses money/asset without trade).
 3.  **Market Distortion:** Forcing a `0.001` price when the market is `0` prevents agents from reacting to a true collapse.
+4.  **Liquidity Loss Bug:** If a taker fails validation after a maker order is popped, the maker order is lost and liquidity disappears.
 
 ### Success Criteria
 - [ ] API rejects requests if `API_KEY` is invalid, AND fails securely (or warns heavily) if `API_KEY` is missing.
 - [ ] `MarketEngine` verifies portfolio feasibility *before* matching orders (Pre-check pattern).
 - [ ] `Trader` logic handles zero/negative prices gracefully without hardcoded magic numbers if possible, or logs them clearly.
+- [ ] Maker orders are restored (or never removed) when taker validation fails post-match.
 
 ---
 
@@ -57,6 +59,7 @@
     3.  If valid, **Execute Order** in `OrderBook`.
     4.  If matched, **Execute Portfolio** (Commit).
 - [ ] Remove "Re-insert" logic.
+ - [ ] Restore maker order when taker validation fails after a match.
 
 ### Phase 3: Edge Case Fixes (`src/agents/trader.py`)
 - [ ] Review `decision.price` logic.

@@ -12,7 +12,7 @@
 
 ### Goal Statement
 <!-- Write one paragraph explaining what you want to achieve and why it matters for your project -->
-**Goal:** Make the simulation reliably functional and deliver a concise, submission-ready README aligned to global guidelines.
+**Goal:** Assess submission readiness and provide a clear go/no-go with remaining blockers and evidence, plus guidance on whether a video demo is worthwhile.
 
 ---
 
@@ -39,9 +39,9 @@ The project needs a reliable trading flow and a clear README for evaluation and 
 
 ### Success Criteria
 <!-- Define exactly how you'll know when this task is complete and successful -->
-- [ ] Simulation produces trades in a standard run.
-- [ ] README includes overview, architecture diagram, how to run, demo guide, and evidence paths.
-- [ ] Documentation aligns with global guidelines and requirements.
+- [ ] Provide a readiness verdict (ready / close / not ready) with evidence pointers.
+- [ ] List concrete blockers or gaps with severity.
+- [ ] Advise on video demo value based on current artifacts and evaluation context.
 
 ---
 
@@ -49,11 +49,11 @@ The project needs a reliable trading flow and a clear README for evaluation and 
 
 ### Development Mode Context
 <!-- This is where you tell the AI agent about your project's constraints and priorities -->
-- **🚨 Project Stage:** TODO: Define if this is new development, production system, or legacy migration
-- **Breaking Changes:** TODO: Specify if breaking changes are acceptable or must be avoided
-- **Data Handling:** TODO: Define data preservation requirements
-- **User Base:** TODO: Describe who will be affected by changes
-- **Priority:** TODO: Set your speed vs stability priorities
+- **🚨 Project Stage:** Submission readiness review
+- **Breaking Changes:** Avoid unnecessary changes
+- **Data Handling:** Preserve existing data/artifacts
+- **User Base:** Evaluators/reviewers
+- **Priority:** Evidence-backed readiness signal
 
 ---
 
@@ -62,7 +62,7 @@ The project needs a reliable trading flow and a clear README for evaluation and 
 ### Functional Requirements
 <!-- This is where the AI will understand exactly what the system should do - be specific about user actions and system behaviors -->
 
-Ensure the simulation executes trades and produces artifacts. Provide a clear README for evaluators.
+Assess evidence (tests, docs, artifacts) to determine readiness and demo recommendation.
 - Example format: "User can [specific action]"
 - Example format: "System automatically [specific behavior]" 
 - Example format: "When [condition] occurs, then [system response]"
@@ -77,9 +77,7 @@ Ensure the simulation executes trades and produces artifacts. Provide a clear RE
 
 ### Technical Constraints
 <!-- This is where you list limitations the AI agent must work within -->
-- [Must use existing system X]
-- [Cannot modify database table Y]
-- [Must maintain compatibility with feature Z]
+- [No code changes unless requested]
 
 ---
 
@@ -142,7 +140,7 @@ TODO: Define your state management approach and data flow strategy
 
 ## 9. Implementation Plan
 
-1) Improve market initialization and action price validation.\n2) Rewrite README with architecture diagram and demo guide.\n3) Verify run outputs.
+1) Review submission artifacts (README, tests, logs/reports) for completeness.\n2) Summarize readiness verdict with blockers.\n3) Recommend whether to produce a video demo.
 
 ---
 
@@ -151,13 +149,13 @@ TODO: Define your state management approach and data flow strategy
 ### Real-Time Progress Tracking
 <!-- This is where you tell the AI agent to update progress as work is completed -->
 
-Checklist of fixes and README sections.
+Checklist of evidence reviewed and verdict provided.
 
 ---
 
 ## 11. File Structure & Organization
 
-Modify `main.py`, `src/market/engine.py`, `src/agents/trader.py`, and `README.md` as needed.
+Review `README.md`, `TECHNICAL_DOCS.md`, `reports/`, `tests/`, and relevant logs for evidence.
 
 ---
 

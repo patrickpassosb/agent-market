@@ -137,7 +137,7 @@ def _build_run_summary() -> dict | None:
 async def get_api_key(api_key: str | None = Depends(api_key_header)):
     """
     FastAPI dependency that validates the configured API key.
-    
+
     Security:
     - If API_KEY is not set in environment, ALL protected requests are rejected (Fail Secure).
     - Requests that do not supply the correct key receive a 403 response.
@@ -150,7 +150,7 @@ async def get_api_key(api_key: str | None = Depends(api_key_header)):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Server security configuration error",
         )
-        
+
     if api_key != API_KEY:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

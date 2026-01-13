@@ -296,14 +296,11 @@ class SimulationRunner:
                 # Maintain a steady tick duration for human readability.
                 await asyncio.sleep(max(0, tick_duration - elapsed))
         finally:
-            is_mock = (
-                self.engine is not None
-                and (
-                    self.engine.__class__.__name__ == "MagicMock"
-                    or getattr(self.engine, "ledger", None) is None
-                    or self.engine.ledger.__class__.__name__ == "MagicMock"
-                    or any(agent.__class__.__name__ == "MagicMock" for agent in self.agents)
-                )
+            is_mock = self.engine is not None and (
+                self.engine.__class__.__name__ == "MagicMock"
+                or getattr(self.engine, "ledger", None) is None
+                or self.engine.ledger.__class__.__name__ == "MagicMock"
+                or any(agent.__class__.__name__ == "MagicMock" for agent in self.agents)
             )
 
             if self.engine and self.run_id and not is_mock:

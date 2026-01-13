@@ -52,9 +52,9 @@ class TestOrderBook:
         match = book.add_buy("buyer", "AAPL", 10.0)
 
         assert match is not None
-        assert match.buyer_id == "buyer"
-        assert match.seller_id == "seller"
-        assert match.price == 9.0  # Maker's price (seller was first)
+        assert match.transaction.buyer_id == "buyer"
+        assert match.transaction.seller_id == "seller"
+        assert match.transaction.price == 9.0  # Maker's price (seller was first)
 
     def test_no_match_when_prices_incompatible(self):
         """Test that incompatible prices don't match"""
@@ -82,12 +82,12 @@ class TestOrderBook:
         # First buyer takes seller1 at 10
         match1 = book.add_buy("buyer1", "AAPL", 12.0)
         assert match1 is not None
-        assert match1.price == 10.0
+        assert match1.transaction.price == 10.0
 
         # Second buyer takes seller2 at 11
         match2 = book.add_buy("buyer2", "AAPL", 12.0)
         assert match2 is not None
-        assert match2.price == 11.0
+        assert match2.transaction.price == 11.0
 
         # No more sellers
         summary = book.get_summary()

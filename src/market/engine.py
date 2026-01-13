@@ -158,16 +158,17 @@ class MarketEngine:
         if action == AgentAction.BUY:
             if not agent.portfolio.has_funds(float(price)):
                 return None
-            transaction = self.order_book.add_buy(agent.id, item, float(price))
+            match = self.order_book.add_buy(agent.id, item, float(price))
 
         elif action == AgentAction.SELL:
             if not agent.portfolio.has_inventory(item, 1):
                 return None
-            transaction = self.order_book.add_sell(agent.id, item, float(price))
+            match = self.order_book.add_sell(agent.id, item, float(price))
         else:
             return None
 
         # 3. Handle Matching (Taker meets Maker)
+        transaction = match.transaction if match else None
         if transaction:
             # We matched an existing order in the book.
             # We must ensure the Maker can still fulfill their side.
@@ -183,11 +184,16 @@ class MarketEngine:
 
             # Atomic Commit: Only execute if BOTH sides are valid
             # If registry is missing, we fallback to partial update (legacy/tests)
-            can_execute = True
+            buyer_valid = True
             if buyer and not buyer.portfolio.has_funds(transaction.price):
-                can_execute = False
+                buyer_valid = False
+            seller_valid = True
             if seller and not seller.portfolio.has_inventory(transaction.item, 1):
-                can_execute = False
+                seller_valid = False
+
+            can_execute = buyer_valid and seller_valid
+            taker_valid = buyer_valid if action == AgentAction.BUY else seller_valid
+            maker_valid = seller_valid if action == AgentAction.BUY else buyer_valid
 
             if can_execute:
                 # COMMIT BOTH SIDES
@@ -196,9 +202,10 @@ class MarketEngine:
                 if seller:
                     seller.portfolio.execute_sell(transaction.item, 1, transaction.price)
             else:
-                # Maker failed validation (state changed since order was placed).
-                # Transaction is aborted. Maker order is already popped from book.
-                # Taker (the current 'agent') should try again later.
+                if match and maker_valid and not taker_valid:
+                    # Restore maker liquidity if the taker lost funds/inventory mid-tick.
+                    self.order_book.restore_order(item, match.maker_is_bid, match.maker_order)
+                # Transaction is aborted; maker orders stay removed when maker is invalid.
                 return None
 
         # 4. Finalize Successful Transaction

@@ -185,7 +185,7 @@ def test_process_action_atomic_multi_agent(engine):
 
     seller = MagicMock()
     seller.id = "seller_1"
-    seller.portfolio = Portfolio(cash=100.0) # Give cash to allow seeding
+    seller.portfolio = Portfolio(cash=100.0)  # Give cash to allow seeding
     seller.portfolio.seed_position("AAPL", 5, 10.0)
 
     registry = {"buyer_1": buyer, "seller_1": seller}
@@ -212,7 +212,7 @@ def test_process_action_aborts_on_maker_failure(engine):
 
     seller = MagicMock()
     seller.id = "seller_1"
-    seller.portfolio = Portfolio(cash=100.0) # Give cash for seeding
+    seller.portfolio = Portfolio(cash=100.0)  # Give cash for seeding
     seller.portfolio.seed_position("AAPL", 1, 10.0)  # Only 1 AAPL
 
     registry = {"buyer_1": buyer, "seller_1": seller}
@@ -231,3 +231,26 @@ def test_process_action_aborts_on_maker_failure(engine):
     assert seller.portfolio.cash == 90.0  # No sale
     # Maker order should have been popped from book even on failure
     assert engine.order_book.get_summary("AAPL")["asks_count"] == 0
+
+
+def test_process_action_restores_maker_on_taker_failure(engine):
+    """Verify maker orders are restored when the taker fails validation after matching."""
+    buyer = MagicMock()
+    buyer.id = "buyer_1"
+    buyer.portfolio = MagicMock()
+    buyer.portfolio.has_funds.side_effect = [True, False]
+
+    seller = MagicMock()
+    seller.id = "seller_1"
+    seller.portfolio = Portfolio(cash=100.0)  # Give cash for seeding
+    seller.portfolio.seed_position("AAPL", 1, 10.0)
+
+    registry = {"buyer_1": buyer, "seller_1": seller}
+
+    engine.process_action(seller, AgentAction.SELL, "AAPL", 15.0, agent_registry=registry)
+    assert engine.order_book.get_summary("AAPL")["asks_count"] == 1
+
+    tx = engine.process_action(buyer, AgentAction.BUY, "AAPL", 15.0, agent_registry=registry)
+
+    assert tx is None
+    assert engine.order_book.get_summary("AAPL")["asks_count"] == 1
