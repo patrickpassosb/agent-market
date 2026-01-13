@@ -52,12 +52,48 @@ type NewsItem = {
   tick: number;
 };
 
+type SimulationConfig = {
+  max_ticks: number;
+  checkpoint_every: number;
+  checkpoint_dir: string;
+  report_enabled: boolean;
+  report_dir: string;
+  initial_price: number;
+  seed_inventory: number;
+  agent_count: number;
+  tick_duration: number;
+  model_provider_order: string;
+};
+
+type SimulationSummary = {
+  run_id: string;
+  ticks: number;
+  total_trades: number;
+  avg_price: number | null;
+  min_price: number | null;
+  max_price: number | null;
+  negotiation_count: number;
+  report_dir?: string | null;
+};
+
 const TICKERS: Ticker[] = ["AAPL", "TSLA", "NVDA", "MSFT"];
 const DEFAULT_TICKERS: TickerMap = {
   AAPL: 0,
   TSLA: 0,
   NVDA: 0,
   MSFT: 0,
+};
+const DEFAULT_SIM_CONFIG: SimulationConfig = {
+  max_ticks: 0,
+  checkpoint_every: 10,
+  checkpoint_dir: "checkpoints",
+  report_enabled: true,
+  report_dir: "reports",
+  initial_price: 0.005,
+  seed_inventory: 10,
+  agent_count: 12,
+  tick_duration: 2.0,
+  model_provider_order: "cerebras,groq,gemini,openrouter,ollama",
 };
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
@@ -132,6 +168,10 @@ export default function Dashboard() {
   const [tickCount, setTickCount] = useState(0);
   const [sentiment, setSentiment] = useState({ bullish_pct: 52, label: "Neutral" });
   const [metrics, setMetrics] = useState({ total_volume: 0, volatility: "Low" });
+  const [simRunning, setSimRunning] = useState(false);
+  const [simConfig, setSimConfig] = useState<SimulationConfig>(DEFAULT_SIM_CONFIG);
+  const [simSummary, setSimSummary] = useState<SimulationSummary | null>(null);
+  const [simReportDir, setSimReportDir] = useState<string | null>(null);
 
   const [priceHistory, setPriceHistory] = useState<Record<Ticker, ChartPoint[]>>(() => createEmptyHistory(DEFAULT_TICKERS));
 
@@ -143,9 +183,10 @@ export default function Dashboard() {
     // Initial HTTP poll to bootstrap market state + agent roster.
     const fetchData = async () => {
       try {
-        const [marketRes, agentsRes] = await Promise.all([
+        const [marketRes, agentsRes, statusRes] = await Promise.all([
           fetch(`${API_BASE}/state`, { headers: API_HEADERS }),
-          fetch(`${API_BASE}/agents`, { headers: API_HEADERS })
+          fetch(`${API_BASE}/agents`, { headers: API_HEADERS }),
+          fetch(`${API_BASE}/simulation/status`, { headers: API_HEADERS }),
         ]);
 
         if (marketRes.ok) {
@@ -161,12 +202,67 @@ export default function Dashboard() {
         if (agentsRes.ok) {
           setAgents(await agentsRes.json());
         }
+        if (statusRes.ok) {
+          const statusData = await statusRes.json();
+          setSimRunning(Boolean(statusData.running));
+          setSimConfig({ ...DEFAULT_SIM_CONFIG, ...(statusData.config ?? {}) });
+          setSimSummary(statusData.summary ?? null);
+          setSimReportDir(statusData.report_dir ?? null);
+        }
       } catch (e) {
         console.error("Initial fetch failed", e);
       }
     };
     fetchData();
   }, []);
+
+  const refreshSimulationStatus = async () => {
+    try {
+      const statusRes = await fetch(`${API_BASE}/simulation/status`, { headers: API_HEADERS });
+      if (!statusRes.ok) return;
+      const statusData = await statusRes.json();
+      setSimRunning(Boolean(statusData.running));
+      setSimConfig({ ...DEFAULT_SIM_CONFIG, ...(statusData.config ?? {}) });
+      setSimSummary(statusData.summary ?? null);
+      setSimReportDir(statusData.report_dir ?? null);
+    } catch (e) {
+      console.error("Simulation status fetch failed", e);
+    }
+  };
+
+  const startSimulation = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/simulation/start`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(API_HEADERS ?? {}),
+        },
+        body: JSON.stringify(simConfig),
+      });
+      if (!response.ok) {
+        console.error("Failed to start simulation");
+      }
+      await refreshSimulationStatus();
+    } catch (e) {
+      console.error("Start simulation failed", e);
+    }
+  };
+
+  const stopSimulation = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/simulation/stop`, {
+        method: "POST",
+        headers: API_HEADERS,
+      });
+      if (!response.ok) {
+        console.error("Failed to stop simulation");
+      }
+      await refreshSimulationStatus();
+    } catch (e) {
+      console.error("Stop simulation failed", e);
+    }
+  };
 
   // React useEffect is used to sync this component with WebSocket updates.
   // Context7 /websites/react_dev (useEffect hook docs).
@@ -327,8 +423,149 @@ export default function Dashboard() {
           </div>
         </section>
 
-        {/* Right Column: Sentiment & Headlines */}
+        {/* Right Column: Controls & Headlines */}
         <section className="flex flex-col gap-6">
+          <div className="glass-panel rounded-[2.5rem] p-6 bg-gradient-to-br from-primary/10 to-transparent">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-[10px] uppercase tracking-widest text-white/40">Simulation Controls</p>
+                <p className="text-lg font-display font-bold text-white">Control Deck</p>
+              </div>
+              <div className="text-xs text-white/50">
+                Status: <span className={simRunning ? "text-primary" : "text-accent"}>{simRunning ? "Running" : "Idle"}</span>
+              </div>
+            </div>
+
+            <div className="mt-4 grid grid-cols-2 gap-3 text-xs text-white/70">
+              <label className="flex flex-col gap-1">
+                Max Ticks
+                <input
+                  type="number"
+                  value={simConfig.max_ticks}
+                  disabled={simRunning}
+                  onChange={(event) => setSimConfig(prev => ({ ...prev, max_ticks: Number(event.target.value) }))}
+                  className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-white/80"
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                Tick Duration (s)
+                <input
+                  type="number"
+                  step="0.1"
+                  value={simConfig.tick_duration}
+                  disabled={simRunning}
+                  onChange={(event) => setSimConfig(prev => ({ ...prev, tick_duration: Number(event.target.value) }))}
+                  className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-white/80"
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                Agent Count
+                <input
+                  type="number"
+                  value={simConfig.agent_count}
+                  disabled={simRunning}
+                  onChange={(event) => setSimConfig(prev => ({ ...prev, agent_count: Number(event.target.value) }))}
+                  className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-white/80"
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                Checkpoint Every
+                <input
+                  type="number"
+                  value={simConfig.checkpoint_every}
+                  disabled={simRunning}
+                  onChange={(event) => setSimConfig(prev => ({ ...prev, checkpoint_every: Number(event.target.value) }))}
+                  className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-white/80"
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                Initial Price
+                <input
+                  type="number"
+                  step="0.0001"
+                  value={simConfig.initial_price}
+                  disabled={simRunning}
+                  onChange={(event) => setSimConfig(prev => ({ ...prev, initial_price: Number(event.target.value) }))}
+                  className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-white/80"
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                Seed Inventory
+                <input
+                  type="number"
+                  value={simConfig.seed_inventory}
+                  disabled={simRunning}
+                  onChange={(event) => setSimConfig(prev => ({ ...prev, seed_inventory: Number(event.target.value) }))}
+                  className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-white/80"
+                />
+              </label>
+            </div>
+
+            <div className="mt-4 grid grid-cols-2 gap-3 text-xs text-white/70">
+              <label className="flex flex-col gap-1">
+                Report Dir
+                <input
+                  type="text"
+                  value={simConfig.report_dir}
+                  disabled={simRunning}
+                  onChange={(event) => setSimConfig(prev => ({ ...prev, report_dir: event.target.value }))}
+                  className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-white/80"
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                Checkpoint Dir
+                <input
+                  type="text"
+                  value={simConfig.checkpoint_dir}
+                  disabled={simRunning}
+                  onChange={(event) => setSimConfig(prev => ({ ...prev, checkpoint_dir: event.target.value }))}
+                  className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-white/80"
+                />
+              </label>
+            </div>
+
+            <div className="mt-4 flex items-center gap-3">
+              <button
+                onClick={startSimulation}
+                disabled={simRunning}
+                className="rounded-full bg-primary px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-black transition disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-white/40"
+              >
+                Start Simulation
+              </button>
+              <button
+                onClick={stopSimulation}
+                disabled={!simRunning}
+                className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-white/70 transition disabled:cursor-not-allowed disabled:text-white/30"
+              >
+                Stop Simulation
+              </button>
+              <div className="text-[10px] text-white/40">
+                {simSummary?.run_id ? `Run: ${simSummary.run_id}` : "No run yet"}
+              </div>
+            </div>
+
+            <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 p-3 text-[10px] text-white/60">
+              <div className="flex justify-between">
+                <span>Total Trades</span>
+                <span className="text-white/90">{simSummary?.total_trades ?? 0}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Avg / Min / Max</span>
+                <span className="text-white/90">
+                  {simSummary?.avg_price?.toFixed(4) ?? "n/a"} / {simSummary?.min_price?.toFixed(4) ?? "n/a"} / {simSummary?.max_price?.toFixed(4) ?? "n/a"}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span>Negotiations</span>
+                <span className="text-white/90">{simSummary?.negotiation_count ?? 0}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Report</span>
+                <span className="text-white/90">{simReportDir ?? simSummary?.report_dir ?? "n/a"}</span>
+              </div>
+            </div>
+          </div>
+
           <div className="glass-panel flex-1 rounded-[2.5rem] p-8 overflow-y-auto">
             <SentimentFeed latestNews={latestNews} />
           </div>

@@ -194,6 +194,21 @@ def select_strategies(count: int) -> list[PersonaStrategy]:
     return strategies + extra
 
 
+def set_provider_order(order: str | None) -> None:
+    """
+    Update provider order at runtime to support UI-configured simulation runs.
+    """
+    if not order:
+        return
+    providers = [item.strip() for item in order.split(",") if item.strip()]
+    if not providers:
+        return
+    global PROVIDER_ORDER
+    PROVIDER_ORDER = providers
+    for key in _ROUND_ROBIN:
+        _ROUND_ROBIN[key] = 0
+
+
 def _available_models(tier: str) -> list[str]:
     """
     Enumerate the configured models for a tier respecting the preferred provider order.

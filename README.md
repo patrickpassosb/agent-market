@@ -98,6 +98,8 @@ Control the simulation with CLI flags:
 
 Use `scripts/run_all.sh` to simultaneously launch both backend (`uvicorn`) and frontend (`npm run dev`) with environment bonding.
 
+The web simulation stays idle until you press **Start Simulation** in the dashboard control panel. The UI also lets you set `max_ticks`, `agent_count`, `tick_duration`, `checkpoint_every`, and report/checkpoint directories before starting.
+
 ## Evidence & Observability
 
 - **Logs**: `logs/` contains Rich & agent traces (`main.py` and `SimulationRunner` logging).
