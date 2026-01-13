@@ -25,6 +25,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.security import APIKeyHeader
+from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from src.market.schema import QUOTE_CURRENCY, SUPPORTED_ASSETS, Transaction
@@ -106,15 +107,51 @@ def _build_ticker_payload() -> dict | None:
     }
 
 
+def _build_run_summary() -> dict | None:
+    if not sim.engine or not sim.run_id:
+        return None
+    transactions = sim.engine.ledger.get_transactions_for_run(sim.run_id)
+    prices = [tx.price for tx in transactions]
+    avg_price = sum(prices) / len(prices) if prices else None
+    min_price = min(prices) if prices else None
+    max_price = max(prices) if prices else None
+    interactions = sim.engine.ledger.get_interactions_for_run(sim.run_id)
+    negotiation_count = 0
+    if interactions:
+        negotiation_count = sum(1 for entry in interactions if entry.kind == "negotiation")
+    return {
+        "run_id": sim.run_id,
+        "ticks": sim.tick_count,
+        "total_trades": len(transactions),
+        "avg_price": avg_price,
+        "min_price": min_price,
+        "max_price": max_price,
+        "negotiation_count": negotiation_count,
+        "report_dir": sim.last_report_dir,
+    }
+
+
 # --- Security Dependency ---
 
 
 async def get_api_key(api_key: str | None = Depends(api_key_header)):
     """
-    FastAPI dependency that validates the configured API key (if present).
-    Requests that do not supply the correct key receive a 403 response.
+    FastAPI dependency that validates the configured API key.
+
+    Security:
+    - If API_KEY is not set in environment, ALL protected requests are rejected (Fail Secure).
+    - Requests that do not supply the correct key receive a 403 response.
     """
-    if API_KEY and api_key != API_KEY:
+    if not API_KEY:
+        logger.critical(
+            "SECURITY ALERT: API_KEY is not set in environment variables. Access denied."
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Server security configuration error",
+        )
+
+    if api_key != API_KEY:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Could not validate credentials",
@@ -152,7 +189,6 @@ async def lifespan(app: FastAPI):
     - Spins up a background broadcast task to push market updates.
     - Ensures graceful shutdown by cancelling tasks and stopping the simulation.
     """
-    await sim.start()
     broadcast_task = asyncio.create_task(broadcast_loop())
     try:
         yield
@@ -160,7 +196,8 @@ async def lifespan(app: FastAPI):
         broadcast_task.cancel()
         with suppress(asyncio.CancelledError):
             await broadcast_task
-        await sim.stop()
+        if sim.running:
+            await sim.stop()
 
 
 app = FastAPI(
@@ -259,6 +296,59 @@ def get_health():
     return {"status": "ok", "running": sim.running}
 
 
+class SimulationStartRequest(BaseModel):
+    # Context7 /websites/fastapi_tiangolo (request body models for POST endpoints).
+    max_ticks: int | None = None
+    checkpoint_every: int | None = None
+    checkpoint_dir: str | None = None
+    checkpoint_transactions: int | None = None
+    checkpoint_interactions: int | None = None
+    report_enabled: bool | None = None
+    report_dir: str | None = None
+    initial_price: float | None = None
+    seed_inventory: int | None = None
+    agent_count: int | None = None
+    tick_duration: float | None = None
+    model_provider_order: str | None = None
+
+
+@app.get("/simulation/status", dependencies=[Depends(get_api_key)])
+def get_simulation_status():
+    """Returns run status and the active configuration for UI control panels."""
+    return {
+        "running": sim.running,
+        "run_id": sim.run_id,
+        "config": sim.config,
+        "summary": sim.last_summary,
+        "report_dir": sim.last_report_dir,
+    }
+
+
+@app.post("/simulation/start", dependencies=[Depends(get_api_key)])
+async def start_simulation(payload: SimulationStartRequest):
+    """Start the simulation with optional configuration overrides."""
+    if sim.running:
+        raise HTTPException(status_code=409, detail="Simulation already running")
+    overrides = payload.model_dump(exclude_none=True)
+    started = await sim.start(overrides)
+    if not started:
+        raise HTTPException(status_code=500, detail="Simulation failed to start")
+    return {"status": "started", "run_id": sim.run_id, "config": sim.config}
+
+
+@app.post("/simulation/stop", dependencies=[Depends(get_api_key)])
+async def stop_simulation():
+    """Stop the simulation and finalize reports/checkpoints if enabled."""
+    if not sim.running:
+        raise HTTPException(status_code=409, detail="Simulation is not running")
+    await sim.stop()
+    return {
+        "status": "stopped",
+        "summary": sim.last_summary,
+        "report_dir": sim.last_report_dir,
+    }
+
+
 @app.get("/state", dependencies=[Depends(get_api_key)])
 def get_state():
     """
@@ -280,6 +370,7 @@ def get_state():
         "tick": sim.tick_count,
         "sentiment": sim.engine.get_global_sentiment(),
         "metrics": sim.engine.get_market_metrics(),
+        "summary": _build_run_summary(),
         "history": history_payload,
     }
 

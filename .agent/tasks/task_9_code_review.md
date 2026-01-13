@@ -36,6 +36,7 @@ The user requests a focused review to spot unnecessary files and redundancy, plu
 - [ ] Provide a prioritized list of files/directories that are likely artifacts or redundant, with evidence or reasoning.
 - [ ] Recommend safe removals, consolidations, or moves, including any required updates to docs or config.
 - [ ] Suggest structural improvements to reduce duplication and improve maintainability.
+- [ ] Provide concrete refactor opportunities for duplicated logic and unclear ownership boundaries.
 
 ---
 
@@ -118,7 +119,9 @@ N/A
 ## 10. Task Completion Tracking
 
 ### Real-Time Progress Tracking
-- Update this task after completing each scan phase.
+- [x] Inventory repo contents and ignore lists to identify obvious artifacts.
+- [x] Cross-check high-risk artifacts against config/docs references.
+- [x] Deliver prioritized cleanup recommendations and refactor suggestions.
 
 ---
 

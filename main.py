@@ -41,7 +41,7 @@ from src.market.schema import (
     InteractionLog,
 )
 from src.utils.checkpoints import build_checkpoint, write_checkpoint
-from src.utils.personas import PersonaStrategy, get_model_for_persona
+from src.utils.personas import get_model_for_persona, select_strategies
 
 # Suppress LiteLLM verbose logging completely
 litellm.set_verbose = False
@@ -382,10 +382,9 @@ async def main():
     agents: list[Trader] = []
 
     # Initialize Agents with random personas
-    available_strategies = list(PersonaStrategy)
-    for i in range(NUM_AGENTS):
+    selected_strategies = select_strategies(NUM_AGENTS)
+    for i, strategy in enumerate(selected_strategies):
         agent_id = f"Agent_{i + 1}"
-        strategy = _secure_choice(available_strategies)
         # Determine appropriate LLM for this persona
         model = get_model_for_persona(strategy.value)
 
@@ -399,6 +398,7 @@ async def main():
                     args.initial_price,
                 )
         agents.append(agent)
+    agent_index = {agent.id: agent for agent in agents}
 
     # Initialize UI
     layout = generate_layout()
@@ -536,6 +536,32 @@ async def main():
                             )
                             if tx:
                                 logging.info(f"  -> TRADE EXECUTED: {tx}")
+                                buyer_agent = agent_index.get(tx.buyer_id)
+                                seller_agent = agent_index.get(tx.seller_id)
+                                if buyer_agent:
+                                    buyer_agent.remember(
+                                        f"Bought {tx.item} from {tx.seller_id} at {tx.price}.",
+                                        metadata={
+                                            "kind": "trade",
+                                            "item": tx.item,
+                                            "action": "buy",
+                                            "price": tx.price,
+                                            "counterparty_id": tx.seller_id,
+                                            "run_id": run_id,
+                                        },
+                                    )
+                                if seller_agent:
+                                    seller_agent.remember(
+                                        f"Sold {tx.item} to {tx.buyer_id} at {tx.price}.",
+                                        metadata={
+                                            "kind": "trade",
+                                            "item": tx.item,
+                                            "action": "sell",
+                                            "price": tx.price,
+                                            "counterparty_id": tx.buyer_id,
+                                            "run_id": run_id,
+                                        },
+                                    )
 
                     # Execute all agents concurrently
                     # The GlobalRateLimiter will handle queuing if we exceed API limits

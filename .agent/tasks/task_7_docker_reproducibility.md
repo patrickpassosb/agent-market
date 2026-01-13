@@ -3,10 +3,10 @@
 ## 1. Task Overview
 
 ### Task Title
-**Title:** Docker Containerization for Reproducibility
+**Title:** Docker Compose Dev UI Enablement
 
 ### Goal Statement
-**Goal:** Implement a `Dockerfile` and `docker-compose.yml` to ensure the simulation can be reliably reproduced and executed in a consistent environment, satisfying the "Minimum Expected Submission" criteria.
+**Goal:** Extend the development Compose stack to run the web UI (Next.js) alongside the backend so reviewers can use the dashboard locally.
 
 ---
 
@@ -33,14 +33,15 @@ The project needs a reproducible environment for evaluators. Manual dependency i
 - [x] `docker-compose up` runs the `main.py` script.
 - [x] `.env` variables are correctly loaded in the container.
 - [x] Local changes are reflected in the container (via volumes).
+- [ ] `docker-compose up` also starts the Next.js dev server and exposes the UI on port 3000.
 
 ---
 
 ## 9. Implementation Plan
 
-- Step 1: Create `Dockerfile` optimized for Python/uv.
-- Step 2: Create `docker-compose.yml` for simplified orchestration.
-- Step 3: Validate the containerized run.
+- Step 1: Update `docker-compose.yml` to add backend + frontend dev services.
+- Step 2: Ensure env vars for UI API/Ws URLs are wired.
+- Step 3: Validate `docker-compose up` exposes the UI on port 3000 and backend on port 8000.
 
 ## 12. AI Agent Instructions
 

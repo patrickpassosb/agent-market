@@ -4,20 +4,20 @@
 
 :root {
   /* Key palette / color tokens used in the UI */
-  --background: 222 47% 4%;
-  --foreground: 210 40% 98%;
+  --background: 0 0% 6%;
+  --foreground: 0 0% 96%;
 
-  --primary: 160 84% 45%;
-  --primary-glow: 160 84% 45% / 0.3;
+  --primary: 0 0% 92%;
+  --primary-glow: 0 0% 92% / 0;
 
-  --secondary: 199 89% 48%;
-  --secondary-glow: 199 89% 48% / 0.3;
+  --secondary: 0 0% 60%;
+  --secondary-glow: 0 0% 60% / 0;
 
-  --accent: 330 81% 60%;
-  --accent-glow: 330 81% 60% / 0.3;
+  --accent: 0 0% 40%;
+  --accent-glow: 0 0% 40% / 0;
 
-  --card: 222 47% 6% / 0.7;
-  --card-border: 217 32% 17% / 0.5;
+  --card: 0 0% 8% / 0.98;
+  --card-border: 0 0% 20% / 0.6;
 
   --font-sans: "Inter", system-ui, sans-serif;
   --font-display: "Outfit", sans-serif;
@@ -42,28 +42,34 @@
     min-height: 100vh;
     overflow-x: hidden;
   }
+
+  input[type="number"] {
+    appearance: textfield;
+  }
+
+  input[type="number"]::-webkit-inner-spin-button,
+  input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
 }
 
 @layer components {
   /* Reusable glassmorphism panels */
   .glass-panel {
     background-color: hsl(var(--card));
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
     border: 1px solid hsl(var(--card-border));
-    box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.5);
+    box-shadow: 0 10px 24px -18px rgb(0 0 0 / 0.6);
   }
 
   /* Smaller cards used inside feeds and agent roster */
   .glass-card {
     background-color: hsl(var(--card));
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
     border: 1px solid hsl(var(--card-border));
     border-radius: 1.5rem;
     padding: 1.5rem;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.5);
+    transition: all 0.25s ease;
+    box-shadow: 0 10px 24px -18px rgb(0 0 0 / 0.6);
   }
 
   .glass-card:hover {
@@ -72,26 +78,19 @@
 
   .neon-text-primary {
     color: hsl(var(--primary));
-    filter: drop-shadow(0 0 8px hsl(var(--primary) / 0.3));
   }
 
   .neon-text-secondary {
     color: hsl(var(--secondary));
-    filter: drop-shadow(0 0 8px hsl(var(--secondary) / 0.3));
   }
 
   .neon-border-primary {
     border-color: hsl(var(--primary) / 0.5);
-    box-shadow: 0 0 15px -3px hsl(var(--primary) / 0.3);
   }
 }
 
 body {
-  background-image:
-    radial-gradient(circle at 50% -20%, hsl(var(--secondary) / 0.15), transparent 70%),
-    radial-gradient(circle at 100% 0%, hsl(var(--primary) / 0.1), transparent 50%),
-    radial-gradient(circle at 0% 100%, hsl(var(--accent) / 0.1), transparent 50%);
-  background-attachment: fixed;
+  background-image: none;
 }
 
 /* Custom scrollbar for premium feel */

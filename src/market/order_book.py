@@ -15,9 +15,17 @@ To simulate a Max-Heap for bids, we negate the price before pushing to the heap.
 """
 
 import heapq
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from .schema import Transaction
+
+
+@dataclass(frozen=True)
+class OrderMatch:
+    transaction: Transaction
+    maker_order: tuple[float, float, str]
+    maker_is_bid: bool
 
 
 class OrderBook:
@@ -65,7 +73,7 @@ class OrderBook:
         """
         return self.asks.setdefault(item, [])
 
-    def add_buy(self, agent_id: str, item: str, price: float) -> Transaction | None:
+    def add_buy(self, agent_id: str, item: str, price: float) -> OrderMatch | None:
         """
         Processes a BUY order (Bid).
 
@@ -80,7 +88,7 @@ class OrderBook:
             price (float): Limit price agent is willing to pay.
 
         Returns:
-            Optional[Transaction]: A Transaction object if a trade executed, otherwise None.
+            Optional[OrderMatch]: A match result if a trade executed, otherwise None.
         """
         # Context7 /python/cpython (datetime docs).
         timestamp = datetime.now(UTC).timestamp()
@@ -94,17 +102,21 @@ class OrderBook:
             # If the lowest ask is cheap enough for the buyer
             if price >= best_ask_price:
                 # MATCH! Remove the ask from the book
-                heapq.heappop(asks)
+                maker_order = heapq.heappop(asks)
 
                 # Execution happens at the Maker's price (the one already in the book)
                 execution_price = best_ask_price
 
-                return Transaction(
-                    buyer_id=agent_id,
-                    seller_id=seller_id,
-                    item=item,
-                    price=execution_price,
-                    timestamp=datetime.now(UTC),
+                return OrderMatch(
+                    transaction=Transaction(
+                        buyer_id=agent_id,
+                        seller_id=seller_id,
+                        item=item,
+                        price=execution_price,
+                        timestamp=datetime.now(UTC),
+                    ),
+                    maker_order=maker_order,
+                    maker_is_bid=False,
                 )
 
         # No match found, add to order book as a resting order
@@ -113,7 +125,7 @@ class OrderBook:
         heapq.heappush(bids, (-price, timestamp, agent_id))
         return None
 
-    def add_sell(self, agent_id: str, item: str, price: float) -> Transaction | None:
+    def add_sell(self, agent_id: str, item: str, price: float) -> OrderMatch | None:
         """
         Processes a SELL order (Ask).
 
@@ -128,7 +140,7 @@ class OrderBook:
             price (float): Limit price agent is willing to sell for.
 
         Returns:
-            Optional[Transaction]: A Transaction object if a trade executed, otherwise None.
+            Optional[OrderMatch]: A match result if a trade executed, otherwise None.
         """
         # Context7 /python/cpython (datetime docs).
         timestamp = datetime.now(UTC).timestamp()
@@ -143,17 +155,21 @@ class OrderBook:
             # If the highest bid is high enough for the seller
             if best_bid_price >= price:
                 # MATCH! Remove the bid from the book
-                heapq.heappop(bids)
+                maker_order = heapq.heappop(bids)
 
                 # Execution happens at the Maker's price (the bid price)
                 execution_price = best_bid_price
 
-                return Transaction(
-                    buyer_id=buyer_id,
-                    seller_id=agent_id,
-                    item=item,
-                    price=execution_price,
-                    timestamp=datetime.now(UTC),
+                return OrderMatch(
+                    transaction=Transaction(
+                        buyer_id=buyer_id,
+                        seller_id=agent_id,
+                        item=item,
+                        price=execution_price,
+                        timestamp=datetime.now(UTC),
+                    ),
+                    maker_order=maker_order,
+                    maker_is_bid=True,
                 )
 
         # No match found, add to order book as a resting order
@@ -212,6 +228,21 @@ class OrderBook:
             "bids_count": sum(len(heap) for heap in self.bids.values()),
             "asks_count": sum(len(heap) for heap in self.asks.values()),
         }
+
+    def restore_order(
+        self,
+        item: str,
+        maker_is_bid: bool,
+        maker_order: tuple[float, float, str],
+    ) -> None:
+        """
+        Restore a previously popped maker order back into the order book.
+        """
+        # Context7 /python/cpython (heapq docs).
+        if maker_is_bid:
+            heapq.heappush(self._get_bids(item), maker_order)
+        else:
+            heapq.heappush(self._get_asks(item), maker_order)
 
     def get_best_quotes(self, item: str) -> tuple[float | None, float | None]:
         """

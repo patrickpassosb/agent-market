@@ -1,7 +1,8 @@
 "use client";
 // Context7 /vercel/next.js/v16.1.1 ("use client" directive).
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { LineData, UTCTimestamp } from "lightweight-charts";
 import MarketPulse from "./MarketPulse";
 import RealtimeChart from "./RealtimeChart";
 import AgentRoster from "./AgentRoster";
@@ -21,10 +22,7 @@ import {
 
 type Ticker = "AAPL" | "TSLA" | "NVDA" | "MSFT";
 type TickerMap = Record<Ticker, number>;
-type ChartPoint = {
-  time: number;
-  value: number;
-};
+type ChartPoint = LineData<UTCTimestamp>;
 type TransactionHistoryRecord = {
   item: Ticker;
   price: number;
@@ -52,6 +50,29 @@ type NewsItem = {
   tick: number;
 };
 
+type SimulationConfig = {
+  max_ticks: number;
+  checkpoint_every: number;
+  checkpoint_dir: string;
+  report_enabled: boolean;
+  report_dir: string;
+  initial_price: number;
+  seed_inventory: number;
+  agent_count: number;
+  tick_duration: number;
+};
+
+type SimulationSummary = {
+  run_id: string;
+  ticks: number;
+  total_trades: number;
+  avg_price: number | null;
+  min_price: number | null;
+  max_price: number | null;
+  negotiation_count: number;
+  report_dir?: string | null;
+};
+
 const TICKERS: Ticker[] = ["AAPL", "TSLA", "NVDA", "MSFT"];
 const DEFAULT_TICKERS: TickerMap = {
   AAPL: 0,
@@ -59,6 +80,25 @@ const DEFAULT_TICKERS: TickerMap = {
   NVDA: 0,
   MSFT: 0,
 };
+const DEFAULT_SIM_CONFIG: SimulationConfig = {
+  max_ticks: 0,
+  checkpoint_every: 10,
+  checkpoint_dir: "checkpoints",
+  report_enabled: true,
+  report_dir: "reports",
+  initial_price: 0.005,
+  seed_inventory: 10,
+  agent_count: 12,
+  tick_duration: 2.0,
+};
+// Context7 /websites/v3_tailwindcss (hover/focus/disabled variants).
+// Context7 /websites/v3_tailwindcss (appearance-none utility).
+const CONTROL_INPUT_CLASSES =
+  "h-9 rounded-xl border border-white/15 bg-black/50 px-3 text-xs text-white/85 transition focus:outline-none focus:ring-1 focus:ring-white/30 focus:border-white/40 hover:border-white/35 disabled:cursor-not-allowed disabled:opacity-60 appearance-none";
+const CONTROL_BUTTON_PRIMARY_CLASSES =
+  "rounded-full border border-white/20 bg-white px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-black transition-all duration-200 hover:-translate-y-0.5 hover:bg-black hover:text-white hover:border-white/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50 focus-visible:ring-offset-2 focus-visible:ring-offset-black/40 disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-white/40";
+const CONTROL_BUTTON_SECONDARY_CLASSES =
+  "rounded-full border border-white/25 bg-transparent px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-white/70 transition-all duration-200 hover:-translate-y-0.5 hover:border-white/60 hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-2 focus-visible:ring-offset-black/40 disabled:cursor-not-allowed disabled:border-white/10 disabled:text-white/30";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8000/ws";
@@ -71,25 +111,31 @@ const WS_URL_WITH_TOKEN = API_KEY
 
 const HISTORY_LIMIT = 200;
 
+// Context7 /tradingview/lightweight-charts (series time uses unix timestamp in seconds).
+const toUtcTimestamp = (value: number): UTCTimestamp => value as UTCTimestamp;
+
 const createEmptyHistory = (basePrices: TickerMap): Record<Ticker, ChartPoint[]> => {
   return TICKERS.reduce((acc, symbol) => {
     const basePrice = basePrices[symbol] ?? 0;
-    acc[symbol] = basePrice > 0 ? [{ time: Math.floor(Date.now() / 1000), value: basePrice }] : [];
+    acc[symbol] =
+      basePrice > 0
+        ? [{ time: toUtcTimestamp(Math.floor(Date.now() / 1000)), value: basePrice }]
+        : [];
     return acc;
   }, {} as Record<Ticker, ChartPoint[]>);
 };
 
 const ensureAscending = (series: ChartPoint[]): ChartPoint[] => {
   if (!series.length) return [];
-  const sorted = [...series].sort((a, b) => a.time - b.time);
+  const sorted = [...series].sort((a, b) => Number(a.time) - Number(b.time));
   const normalized: ChartPoint[] = [];
   let lastTime = -Infinity;
   for (const point of sorted) {
-    let time = point.time;
+    let time = Number(point.time);
     if (time <= lastTime) {
       time = lastTime + 1;
     }
-    normalized.push({ ...point, time });
+    normalized.push({ ...point, time: toUtcTimestamp(time) });
     lastTime = time;
   }
   return normalized;
@@ -104,7 +150,7 @@ const normalizeHistory = (records: TransactionHistoryRecord[], basePrices: Ticke
   records.forEach((record) => {
     if (!TICKERS.includes(record.item)) return;
     const point: ChartPoint = {
-      time: Math.floor(new Date(record.timestamp).getTime() / 1000),
+      time: toUtcTimestamp(Math.floor(new Date(record.timestamp).getTime() / 1000)),
       value: record.price,
     };
     history[record.item].push(point);
@@ -113,7 +159,7 @@ const normalizeHistory = (records: TransactionHistoryRecord[], basePrices: Ticke
   for (const symbol of TICKERS) {
     if (!history[symbol].length && (basePrices[symbol] ?? 0) > 0) {
       history[symbol].push({
-        time: Math.floor(Date.now() / 1000),
+        time: toUtcTimestamp(Math.floor(Date.now() / 1000)),
         value: basePrices[symbol],
       });
     }
@@ -132,8 +178,14 @@ export default function Dashboard() {
   const [tickCount, setTickCount] = useState(0);
   const [sentiment, setSentiment] = useState({ bullish_pct: 52, label: "Neutral" });
   const [metrics, setMetrics] = useState({ total_volume: 0, volatility: "Low" });
+  const [simRunning, setSimRunning] = useState(false);
+  const [simConfig, setSimConfig] = useState<SimulationConfig>(DEFAULT_SIM_CONFIG);
+  const [simSummary, setSimSummary] = useState<SimulationSummary | null>(null);
+  const [simReportDir, setSimReportDir] = useState<string | null>(null);
 
   const [priceHistory, setPriceHistory] = useState<Record<Ticker, ChartPoint[]>>(() => createEmptyHistory(DEFAULT_TICKERS));
+  // Context7: https://react.dev/reference/react/useRef (store mutable values without re-rendering)
+  const lastTickRef = useRef<number | null>(null);
 
   const [activeSymbol, setActiveSymbol] = useState<Ticker>("AAPL");
 
@@ -143,9 +195,10 @@ export default function Dashboard() {
     // Initial HTTP poll to bootstrap market state + agent roster.
     const fetchData = async () => {
       try {
-        const [marketRes, agentsRes] = await Promise.all([
+        const [marketRes, agentsRes, statusRes] = await Promise.all([
           fetch(`${API_BASE}/state`, { headers: API_HEADERS }),
-          fetch(`${API_BASE}/agents`, { headers: API_HEADERS })
+          fetch(`${API_BASE}/agents`, { headers: API_HEADERS }),
+          fetch(`${API_BASE}/simulation/status`, { headers: API_HEADERS }),
         ]);
 
         if (marketRes.ok) {
@@ -161,12 +214,69 @@ export default function Dashboard() {
         if (agentsRes.ok) {
           setAgents(await agentsRes.json());
         }
+        if (statusRes.ok) {
+          const statusData = await statusRes.json();
+          setSimRunning(Boolean(statusData.running));
+          setSimConfig({ ...DEFAULT_SIM_CONFIG, ...(statusData.config ?? {}) });
+          setSimSummary(statusData.summary ?? null);
+          setSimReportDir(statusData.report_dir ?? null);
+        }
       } catch (e) {
         console.error("Initial fetch failed", e);
       }
     };
     fetchData();
   }, []);
+
+  const refreshSimulationStatus = async () => {
+    try {
+      const statusRes = await fetch(`${API_BASE}/simulation/status`, { headers: API_HEADERS });
+      if (!statusRes.ok) return;
+      const statusData = await statusRes.json();
+      setSimRunning(Boolean(statusData.running));
+      setSimConfig({ ...DEFAULT_SIM_CONFIG, ...(statusData.config ?? {}) });
+      setSimSummary(statusData.summary ?? null);
+      setSimReportDir(statusData.report_dir ?? null);
+    } catch (e) {
+      console.error("Simulation status fetch failed", e);
+    }
+  };
+
+  const startSimulation = async () => {
+    try {
+      const startPayload = { ...simConfig } as Record<string, unknown>;
+      delete startPayload.model_provider_order;
+      const response = await fetch(`${API_BASE}/simulation/start`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(API_HEADERS ?? {}),
+        },
+        body: JSON.stringify(startPayload),
+      });
+      if (!response.ok) {
+        console.error("Failed to start simulation");
+      }
+      await refreshSimulationStatus();
+    } catch (e) {
+      console.error("Start simulation failed", e);
+    }
+  };
+
+  const stopSimulation = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/simulation/stop`, {
+        method: "POST",
+        headers: API_HEADERS,
+      });
+      if (!response.ok) {
+        console.error("Failed to stop simulation");
+      }
+      await refreshSimulationStatus();
+    } catch (e) {
+      console.error("Stop simulation failed", e);
+    }
+  };
 
   // React useEffect is used to sync this component with WebSocket updates.
   // Context7 /websites/react_dev (useEffect hook docs).
@@ -183,9 +293,9 @@ export default function Dashboard() {
       setPriceHistory((prev) => {
         const next = { ...prev };
         const series = next[record.item] ?? [];
-        const lastTime = series.length ? series[series.length - 1].time : -Infinity;
+        const lastTime = series.length ? Number(series[series.length - 1].time) : -Infinity;
         const point: ChartPoint = {
-          time: baseTime <= lastTime ? lastTime + 1 : baseTime,
+          time: toUtcTimestamp(baseTime <= lastTime ? lastTime + 1 : baseTime),
           value: record.price,
         };
         const updated = [...series, point];
@@ -193,6 +303,31 @@ export default function Dashboard() {
           updated.shift();
         }
         next[record.item] = updated;
+        return next;
+      });
+    };
+
+    const appendPriceSnapshot = (prices: TickerMap) => {
+      const now = Math.floor(Date.now() / 1000);
+      setPriceHistory((prev) => {
+        const next = { ...prev };
+        TICKERS.forEach((symbol) => {
+          const value = prices[symbol];
+          if (typeof value !== "number") {
+            return;
+          }
+          const series = next[symbol] ?? [];
+          const lastTime = series.length ? Number(series[series.length - 1].time) : -Infinity;
+          const point: ChartPoint = {
+            time: toUtcTimestamp(now <= lastTime ? lastTime + 1 : now),
+            value,
+          };
+          const updated = [...series, point];
+          if (updated.length > HISTORY_LIMIT) {
+            updated.shift();
+          }
+          next[symbol] = updated;
+        });
         return next;
       });
     };
@@ -218,6 +353,13 @@ export default function Dashboard() {
             }
             if (typeof payload.tick === "number") {
               setTickCount(payload.tick);
+              const hasNewTick = payload.tick !== lastTickRef.current;
+              if (hasNewTick && !payload.latest_transaction) {
+                appendPriceSnapshot(payload.data);
+              }
+              if (hasNewTick) {
+                lastTickRef.current = payload.tick;
+              }
             }
             if (payload.latest_transaction) {
               appendHistoryPoint(payload.latest_transaction);
@@ -319,7 +461,7 @@ export default function Dashboard() {
 
         {/* Center Column: Chart & Main Agent Roster */}
         <section className="flex flex-col gap-6">
-          <div className="glass-panel flex-1 rounded-[2.5rem] p-8">
+          <div className="glass-panel h-[360px] overflow-hidden rounded-[2.5rem] p-8 md:h-[420px]">
             <RealtimeChart key={activeSymbol} seriesData={activeSeries} symbol={activeSymbol} />
           </div>
           <div className="glass-panel max-h-[400px] rounded-[2.5rem] p-8 overflow-y-auto">
@@ -327,8 +469,149 @@ export default function Dashboard() {
           </div>
         </section>
 
-        {/* Right Column: Sentiment & Headlines */}
+        {/* Right Column: Controls & Headlines */}
         <section className="flex flex-col gap-6">
+          <div className="glass-panel rounded-[2.5rem] p-6 bg-gradient-to-br from-primary/10 to-transparent">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-[10px] uppercase tracking-widest text-white/40">Simulation Controls</p>
+                <p className="text-lg font-display font-bold text-white">Control Deck</p>
+              </div>
+              <div className="text-xs text-white/50">
+                Status: <span className={simRunning ? "text-primary" : "text-accent"}>{simRunning ? "Running" : "Idle"}</span>
+              </div>
+            </div>
+
+            <div className="mt-4 grid grid-cols-2 gap-3 text-xs text-white/70">
+              <label className="flex flex-col gap-1">
+                Max Ticks
+                <input
+                  type="number"
+                  value={simConfig.max_ticks}
+                  disabled={simRunning}
+                  onChange={(event) => setSimConfig(prev => ({ ...prev, max_ticks: Number(event.target.value) }))}
+                  className={CONTROL_INPUT_CLASSES}
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                Tick Duration (s)
+                <input
+                  type="number"
+                  step="0.1"
+                  value={simConfig.tick_duration}
+                  disabled={simRunning}
+                  onChange={(event) => setSimConfig(prev => ({ ...prev, tick_duration: Number(event.target.value) }))}
+                  className={CONTROL_INPUT_CLASSES}
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                Agent Count
+                <input
+                  type="number"
+                  value={simConfig.agent_count}
+                  disabled={simRunning}
+                  onChange={(event) => setSimConfig(prev => ({ ...prev, agent_count: Number(event.target.value) }))}
+                  className={CONTROL_INPUT_CLASSES}
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                Checkpoint Every
+                <input
+                  type="number"
+                  value={simConfig.checkpoint_every}
+                  disabled={simRunning}
+                  onChange={(event) => setSimConfig(prev => ({ ...prev, checkpoint_every: Number(event.target.value) }))}
+                  className={CONTROL_INPUT_CLASSES}
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                Initial Price
+                <input
+                  type="number"
+                  step="0.0001"
+                  value={simConfig.initial_price}
+                  disabled={simRunning}
+                  onChange={(event) => setSimConfig(prev => ({ ...prev, initial_price: Number(event.target.value) }))}
+                  className={CONTROL_INPUT_CLASSES}
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                Seed Inventory
+                <input
+                  type="number"
+                  value={simConfig.seed_inventory}
+                  disabled={simRunning}
+                  onChange={(event) => setSimConfig(prev => ({ ...prev, seed_inventory: Number(event.target.value) }))}
+                  className={CONTROL_INPUT_CLASSES}
+                />
+              </label>
+            </div>
+
+            <div className="mt-4 grid grid-cols-2 gap-3 text-xs text-white/70">
+              <label className="flex flex-col gap-1">
+                Report Dir
+                <input
+                  type="text"
+                  value={simConfig.report_dir}
+                  disabled={simRunning}
+                  onChange={(event) => setSimConfig(prev => ({ ...prev, report_dir: event.target.value }))}
+                  className={CONTROL_INPUT_CLASSES}
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                Checkpoint Dir
+                <input
+                  type="text"
+                  value={simConfig.checkpoint_dir}
+                  disabled={simRunning}
+                  onChange={(event) => setSimConfig(prev => ({ ...prev, checkpoint_dir: event.target.value }))}
+                  className={CONTROL_INPUT_CLASSES}
+                />
+              </label>
+            </div>
+
+            <div className="mt-4 flex items-center gap-3">
+              <button
+                onClick={startSimulation}
+                disabled={simRunning}
+                className={CONTROL_BUTTON_PRIMARY_CLASSES}
+              >
+                Start Simulation
+              </button>
+              <button
+                onClick={stopSimulation}
+                disabled={!simRunning}
+                className={CONTROL_BUTTON_SECONDARY_CLASSES}
+              >
+                Stop Simulation
+              </button>
+              <div className="text-[10px] text-white/40">
+                {simSummary?.run_id ? `Run: ${simSummary.run_id}` : "No run yet"}
+              </div>
+            </div>
+
+            <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 p-3 text-[10px] text-white/60">
+              <div className="flex justify-between">
+                <span>Total Trades</span>
+                <span className="text-white/90">{simSummary?.total_trades ?? 0}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Avg / Min / Max</span>
+                <span className="text-white/90">
+                  {simSummary?.avg_price?.toFixed(4) ?? "n/a"} / {simSummary?.min_price?.toFixed(4) ?? "n/a"} / {simSummary?.max_price?.toFixed(4) ?? "n/a"}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span>Negotiations</span>
+                <span className="text-white/90">{simSummary?.negotiation_count ?? 0}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Report</span>
+                <span className="text-white/90">{simReportDir ?? simSummary?.report_dir ?? "n/a"}</span>
+              </div>
+            </div>
+          </div>
+
           <div className="glass-panel flex-1 rounded-[2.5rem] p-8 overflow-y-auto">
             <SentimentFeed latestNews={latestNews} />
           </div>

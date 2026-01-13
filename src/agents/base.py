@@ -57,11 +57,12 @@ class BaseAgent(ABC):
         """
         pass
 
-    def remember(self, text: str):
+    def remember(self, text: str, metadata: dict | None = None):
         """
         Stores a text string into the agent's long-term memory.
 
         Args:
             text (str): The fact, observation, or thought to remember.
+            metadata (dict | None): Optional metadata to store with the memory.
         """
-        self.memory.add_memory(text)
+        self.memory.add_memory(text, metadata=metadata)

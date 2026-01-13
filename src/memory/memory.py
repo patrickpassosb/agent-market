@@ -68,18 +68,32 @@ class AgentMemory:
             ids=[str(uuid.uuid4())],  # Generate unique ID for the memory fragment.
         )
 
-    def retrieve_memory(self, query: str, n_results: int = 5) -> list[str]:
+    def retrieve_memory(
+        self,
+        query: str,
+        n_results: int = 5,
+        where: dict[str, Any] | None = None,
+    ) -> list[str]:
         """
         Retrieves the most relevant memories for a given query.
 
         Args:
             query (str): The search text (e.g., "market strategy").
             n_results (int): How many matches to return.
+            where (dict[str, Any] | None): Optional metadata filter for the query.
 
         Returns:
             List[str]: A list of matched memory texts.
         """
-        results = self.collection.query(query_texts=[query], n_results=n_results)
+        # Context7 /chroma-core/chroma (query with metadata filtering).
+        if where:
+            results = self.collection.query(
+                query_texts=[query],
+                n_results=n_results,
+                where=where,
+            )
+        else:
+            results = self.collection.query(query_texts=[query], n_results=n_results)
 
         # Chroma returns a list of lists (one per query)
         # We only queried one string, so we return the first list of documents.

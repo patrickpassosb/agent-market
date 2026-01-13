@@ -6,7 +6,7 @@
 **Title:** Validate repo compliance with global guidelines and marketplace simulation requirements
 
 ### Goal Statement
-**Goal:** Update the repository to meet `context/global-guidelines.md` and `context/multi-agent-marketplace-simulation.md` requirements, including negotiation tooling, interaction logging, checkpoints, demo guide, and reproducibility alignment.
+**Goal:** Assess repository compliance with `context/global-guidelines.md` and `context/multi-agent-marketplace-simulation.md`, including evidence of a completed end-to-end simulation run with measurable outcomes, README checklist coverage, and traceability (logs/reports).
 
 ---
 
@@ -30,11 +30,10 @@
 It is unclear whether the repo currently satisfies the project-level global guidelines and the multi-agent marketplace simulation requirements. We need a structured, evidence-based verification.
 
 ### Success Criteria
-- [ ] Add negotiation tooling with logged negotiation interactions.
-- [ ] Persist interaction logs in the database alongside transactions.
-- [ ] Add checkpoint output generation and document it.
-- [ ] Provide a demo guide and experiment evidence path(s) in README.
-- [ ] Align README Python version with `pyproject.toml` (>=3.12).
+- [ ] Map each requirement from both context docs to evidence in the repo (or identify gaps).
+- [ ] Verify whether at least one complete market simulation run exists with measurable outcomes and cite artifacts (reports/logs/plots/db).
+- [ ] Check README for the required checklist and end-to-end demo command/script coverage.
+- [ ] Evaluate structure/traceability/architecture quality against the five-star criteria described in the context docs and request.
 
 ---
 

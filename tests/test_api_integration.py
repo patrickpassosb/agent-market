@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi.testclient import TestClient
 
-from src.api.server import app
+from src.api.server import API_KEY, app
 
 
 def test_websocket_connection():
@@ -19,7 +19,12 @@ def test_websocket_connection():
             mock_sim.stop = AsyncMock()  # Ensure stop is awaitable
 
             with TestClient(app, base_url="http://localhost") as client:
-                with client.websocket_connect("/ws", headers={"Host": "localhost"}) as websocket:
+                ws_path = "/ws"
+                if API_KEY:
+                    ws_path = f"{ws_path}?token={API_KEY}"
+                # Context7 /websites/fastapi_tiangolo (TestClient.websocket_connect accepts
+                # URL paths with query params).
+                with client.websocket_connect(ws_path, headers={"Host": "localhost"}) as websocket:
                     # The server sends a ticker update immediately upon connection
                     data = websocket.receive_json()
                     assert "type" in data

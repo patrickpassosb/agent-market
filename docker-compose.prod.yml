@@ -1,5 +1,3 @@
-version: '3.8'
-
 # Production-oriented compose file: backend API, Next.js frontend, and nginx reverse proxy.
 
 services:
@@ -14,7 +12,8 @@ services:
       - ENV=production
       - ALLOWED_ORIGINS=http://localhost,http://127.0.0.1
     volumes:
-      - market_data:/app
+      - market_data:/app/market.db
+      - chroma_data:/app/chroma_db
     restart: always
     # No ports exposed directly, handled by nginx
 
@@ -41,5 +40,6 @@ services:
 
 volumes:
   market_data:
-    # This will persist market.db and chroma_db if they are in the root /app
-    # Note: market.db is in /app/market.db, chroma_db is in /app/chroma_db
+    # Persists the SQLite database file.
+  chroma_data:
+    # Persists the ChromaDB vector store.

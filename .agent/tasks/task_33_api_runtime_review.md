@@ -78,3 +78,4 @@ Agents appear to show API model names, but market activity looks stalled. Need t
 ## Findings Summary
 - Supported assets are limited to `AAPL`, `TSLA`, `NVDA`, `MSFT` in `src/market/schema.py`, and the chart is hard-coded to `AAPL` in the dashboard.
 - API-backed agents are hitting free-tier rate limits and Gemini model 404s, which leads to fewer/no trades and flat prices; sentiment/metrics update only when trades happen.
+- Current logs show repeated LiteLLM rate-limit errors (OpenRouter/Groq) and Gemini NotFound errors, preventing trades and keeping charts flat.

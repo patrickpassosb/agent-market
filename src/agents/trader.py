@@ -174,8 +174,17 @@ class Trader(BaseAgent):
         # 1. Get portfolio context
         portfolio_metrics = self.portfolio.get_metrics(all_current_prices)
 
-        # 2. Retrieve relevant memories
-        recent_memories = self.memory.retrieve_memory("trading decision", n_results=3)
+        # 2. Retrieve relevant memories (item-scoped decisions/trades).
+        recent_memories = self.memory.retrieve_memory(
+            query=f"{focused_item} trade decision",
+            n_results=3,
+            where={
+                "$and": [
+                    {"item": {"$eq": focused_item}},
+                    {"kind": {"$in": ["decision", "trade"]}},
+                ]
+            },
+        )
         memory_context = (
             "\n".join(recent_memories) if recent_memories else "No past trades recorded."
         )
@@ -244,17 +253,23 @@ class Trader(BaseAgent):
 
             if decision.action in ("buy", "sell"):
                 if not math.isfinite(decision.price) or decision.price <= 0:
-                    # Ensure tradable prices to avoid zero-trade runs.
-                    # Context7 /python/cpython (math docs).
+                    # Robust fallback for invalid LLM price output.
+                    # If current price is 0, we use a minimal tick (0.0001).
                     decision.price = (
-                        market_state.current_price if market_state.current_price > 0 else 0.001
+                        market_state.current_price if market_state.current_price > 0 else 0.0001
                     )
 
             # Log the reasoning to the agent's internal long-term memory so future
             # prompts benefit from previous rationale.
             self.remember(
                 f"Decided to {decision.action} {decision.item} at {decision.price}: "
-                f"{decision.reasoning}"
+                f"{decision.reasoning}",
+                metadata={
+                    "kind": "decision",
+                    "item": decision.item,
+                    "action": decision.action,
+                    "price": decision.price,
+                },
             )
 
             # Convert string action to internal Enum

@@ -44,6 +44,14 @@ class Portfolio(BaseModel):
     # Context7 /pydantic/pydantic (PrivateAttr docs).
     _cost_basis: dict[str, float] = PrivateAttr(default_factory=dict)
 
+    def has_funds(self, amount: float) -> bool:
+        """Check if the portfolio has enough cash for a purchase."""
+        return self.cash >= amount
+
+    def has_inventory(self, item: str, quantity: int) -> bool:
+        """Check if the portfolio has enough of an asset to sell."""
+        return self.positions.get(item, 0) >= quantity
+
     def execute_buy(self, item: str, quantity: int, price: float) -> bool:
         """
         Execute a buy order if sufficient cash.
