@@ -95,14 +95,14 @@ const DEFAULT_SIM_CONFIG: SimulationConfig = {
   tick_duration: 2.0,
   model_provider_order: "cerebras,groq,gemini,openrouter,ollama",
 };
-// Context7: https://v3.tailwindcss.com/docs/hover-focus-and-other-states (hover/focus/disabled variants)
-// Context7: https://v3.tailwindcss.com/docs/appearance (appearance-none utility)
+// Context7 /websites/v3_tailwindcss (hover/focus/disabled variants).
+// Context7 /websites/v3_tailwindcss (appearance-none utility).
 const CONTROL_INPUT_CLASSES =
-  "h-9 rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-white/80 transition focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/40 hover:border-white/20 disabled:cursor-not-allowed disabled:opacity-60 appearance-none";
+  "h-9 rounded-xl border border-white/15 bg-black/50 px-3 text-xs text-white/85 transition focus:outline-none focus:ring-1 focus:ring-white/30 focus:border-white/40 hover:border-white/35 disabled:cursor-not-allowed disabled:opacity-60 appearance-none";
 const CONTROL_BUTTON_PRIMARY_CLASSES =
-  "rounded-full bg-primary px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-black transition-all duration-200 hover:-translate-y-0.5 hover:bg-primary/80 hover:shadow-[0_0_12px_rgba(20,252,195,0.35)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2 focus-visible:ring-offset-black/30 disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-white/40";
+  "rounded-full border border-white/20 bg-white px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-black transition-all duration-200 hover:-translate-y-0.5 hover:bg-black hover:text-white hover:border-white/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50 focus-visible:ring-offset-2 focus-visible:ring-offset-black/40 disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-white/40";
 const CONTROL_BUTTON_SECONDARY_CLASSES =
-  "rounded-full border border-white/10 bg-white/5 px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-white/70 transition-all duration-200 hover:-translate-y-0.5 hover:border-white/30 hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-2 focus-visible:ring-offset-black/30 disabled:cursor-not-allowed disabled:border-white/10 disabled:text-white/30";
+  "rounded-full border border-white/25 bg-transparent px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-white/70 transition-all duration-200 hover:-translate-y-0.5 hover:border-white/60 hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-2 focus-visible:ring-offset-black/40 disabled:cursor-not-allowed disabled:border-white/10 disabled:text-white/30";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8000/ws";

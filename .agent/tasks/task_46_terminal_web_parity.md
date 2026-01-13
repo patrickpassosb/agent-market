@@ -122,7 +122,7 @@ No new UI required unless needed for parity controls.
 ## 10. Task Completion Tracking
 
 ### Real-Time Progress Tracking
-Checklist of parity features implemented.
+- [x] Refined control deck primary button hover state for clearer visual feedback.
 
 ---
 
