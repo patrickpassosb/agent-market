@@ -2,6 +2,7 @@
 // Context7 /vercel/next.js/v16.1.1 ("use client" directive).
 
 import { useEffect, useRef, useState } from "react";
+import type { LineData, UTCTimestamp } from "lightweight-charts";
 import MarketPulse from "./MarketPulse";
 import RealtimeChart from "./RealtimeChart";
 import AgentRoster from "./AgentRoster";
@@ -21,10 +22,7 @@ import {
 
 type Ticker = "AAPL" | "TSLA" | "NVDA" | "MSFT";
 type TickerMap = Record<Ticker, number>;
-type ChartPoint = {
-  time: number;
-  value: number;
-};
+type ChartPoint = LineData<UTCTimestamp>;
 type TransactionHistoryRecord = {
   item: Ticker;
   price: number;
@@ -62,7 +60,6 @@ type SimulationConfig = {
   seed_inventory: number;
   agent_count: number;
   tick_duration: number;
-  model_provider_order: string;
 };
 
 type SimulationSummary = {
@@ -93,7 +90,6 @@ const DEFAULT_SIM_CONFIG: SimulationConfig = {
   seed_inventory: 10,
   agent_count: 12,
   tick_duration: 2.0,
-  model_provider_order: "cerebras,groq,gemini,openrouter,ollama",
 };
 // Context7 /websites/v3_tailwindcss (hover/focus/disabled variants).
 // Context7 /websites/v3_tailwindcss (appearance-none utility).
@@ -115,25 +111,31 @@ const WS_URL_WITH_TOKEN = API_KEY
 
 const HISTORY_LIMIT = 200;
 
+// Context7 /tradingview/lightweight-charts (series time uses unix timestamp in seconds).
+const toUtcTimestamp = (value: number): UTCTimestamp => value as UTCTimestamp;
+
 const createEmptyHistory = (basePrices: TickerMap): Record<Ticker, ChartPoint[]> => {
   return TICKERS.reduce((acc, symbol) => {
     const basePrice = basePrices[symbol] ?? 0;
-    acc[symbol] = basePrice > 0 ? [{ time: Math.floor(Date.now() / 1000), value: basePrice }] : [];
+    acc[symbol] =
+      basePrice > 0
+        ? [{ time: toUtcTimestamp(Math.floor(Date.now() / 1000)), value: basePrice }]
+        : [];
     return acc;
   }, {} as Record<Ticker, ChartPoint[]>);
 };
 
 const ensureAscending = (series: ChartPoint[]): ChartPoint[] => {
   if (!series.length) return [];
-  const sorted = [...series].sort((a, b) => a.time - b.time);
+  const sorted = [...series].sort((a, b) => Number(a.time) - Number(b.time));
   const normalized: ChartPoint[] = [];
   let lastTime = -Infinity;
   for (const point of sorted) {
-    let time = point.time;
+    let time = Number(point.time);
     if (time <= lastTime) {
       time = lastTime + 1;
     }
-    normalized.push({ ...point, time });
+    normalized.push({ ...point, time: toUtcTimestamp(time) });
     lastTime = time;
   }
   return normalized;
@@ -148,7 +150,7 @@ const normalizeHistory = (records: TransactionHistoryRecord[], basePrices: Ticke
   records.forEach((record) => {
     if (!TICKERS.includes(record.item)) return;
     const point: ChartPoint = {
-      time: Math.floor(new Date(record.timestamp).getTime() / 1000),
+      time: toUtcTimestamp(Math.floor(new Date(record.timestamp).getTime() / 1000)),
       value: record.price,
     };
     history[record.item].push(point);
@@ -157,7 +159,7 @@ const normalizeHistory = (records: TransactionHistoryRecord[], basePrices: Ticke
   for (const symbol of TICKERS) {
     if (!history[symbol].length && (basePrices[symbol] ?? 0) > 0) {
       history[symbol].push({
-        time: Math.floor(Date.now() / 1000),
+        time: toUtcTimestamp(Math.floor(Date.now() / 1000)),
         value: basePrices[symbol],
       });
     }
@@ -242,13 +244,15 @@ export default function Dashboard() {
 
   const startSimulation = async () => {
     try {
+      const startPayload = { ...simConfig } as Record<string, unknown>;
+      delete startPayload.model_provider_order;
       const response = await fetch(`${API_BASE}/simulation/start`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           ...(API_HEADERS ?? {}),
         },
-        body: JSON.stringify(simConfig),
+        body: JSON.stringify(startPayload),
       });
       if (!response.ok) {
         console.error("Failed to start simulation");
@@ -289,9 +293,9 @@ export default function Dashboard() {
       setPriceHistory((prev) => {
         const next = { ...prev };
         const series = next[record.item] ?? [];
-        const lastTime = series.length ? series[series.length - 1].time : -Infinity;
+        const lastTime = series.length ? Number(series[series.length - 1].time) : -Infinity;
         const point: ChartPoint = {
-          time: baseTime <= lastTime ? lastTime + 1 : baseTime,
+          time: toUtcTimestamp(baseTime <= lastTime ? lastTime + 1 : baseTime),
           value: record.price,
         };
         const updated = [...series, point];
@@ -313,9 +317,9 @@ export default function Dashboard() {
             return;
           }
           const series = next[symbol] ?? [];
-          const lastTime = series.length ? series[series.length - 1].time : -Infinity;
+          const lastTime = series.length ? Number(series[series.length - 1].time) : -Infinity;
           const point: ChartPoint = {
-            time: now <= lastTime ? lastTime + 1 : now,
+            time: toUtcTimestamp(now <= lastTime ? lastTime + 1 : now),
             value,
           };
           const updated = [...series, point];

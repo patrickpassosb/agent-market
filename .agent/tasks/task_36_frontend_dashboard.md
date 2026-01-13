@@ -154,6 +154,7 @@ Local component state with hooks; update agent roster on WS tick events or contr
 - [x] Improve persona readability with expandable details in `AgentRoster`.
 - [x] Remove persona toggle UI and render full persona text inline.
 - [x] Normalize agent card spacing and align total-value/footer blocks.
+- [x] Align chart series time types with lightweight-charts `UTCTimestamp`.
 
 ---
 

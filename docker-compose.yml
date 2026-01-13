@@ -1,27 +1,45 @@
-version: '3.8'
-
-# Development compose file that mounts the source tree and keeps the terminal UI interactive.
+# Development compose file that runs the API + web UI, with optional terminal UI.
 
 services:
-  agent-market:
-    # Build context is the current directory
+  backend:
     build: .
-    
-    # Load environment variables (API keys) from .env file
+    command: ["uv", "run", "uvicorn", "src.api.server:app", "--host", "0.0.0.0", "--port", "8000"]
     env_file:
       - .env
-    
-    # Volume Mounts for Development Experience
+    environment:
+      - ENV=development
+      - ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
     volumes:
-      # 1. Mount source code: allows live editing without rebuilding
       - .:/app
-      # 2. Mount anonymous volume for .venv: prevents local host's venv from conflicting with container's venv
       - /app/.venv
-    
-    # Interactive Mode Support
-    # Required for 'rich' CLI dashboard to render correctly
+    ports:
+      - "8000:8000"
+
+  frontend:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm run dev"
+    environment:
+      - NEXT_PUBLIC_API_BASE=http://localhost:8000
+      - NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws
+      - NEXT_PUBLIC_API_KEY=${API_KEY}
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+  terminal:
+    build: .
+    command: ["uv", "run", "main.py"]
+    env_file:
+      - .env
+    volumes:
+      - .:/app
+      - /app/.venv
     tty: true
     stdin_open: true
-    
-    # Logging
-    # Logs will be accessible via `docker logs -f agent-market`
+    profiles:
+      - terminal

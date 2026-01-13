@@ -7,12 +7,13 @@ import {
   type IChartApi,
   type ISeriesApi,
   type LineData,
+  type UTCTimestamp,
   ColorType,
   CrosshairMode,
 } from "lightweight-charts";
 
 type RealtimeChartProps = {
-  seriesData: LineData[];
+  seriesData: LineData<UTCTimestamp>[];
   symbol: string;
 };
 

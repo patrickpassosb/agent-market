@@ -118,6 +118,8 @@ The web simulation stays idle until you press **Start Simulation** in the dashbo
 ## Docker & Production Deployment
 
 - Development Compose: `docker-compose.yml` mounts the repository for iterative tinkering.
+- Dev UI (API + dashboard): `docker compose up --build` exposes `http://localhost:8000` (API) and `http://localhost:3000` (UI).
+- Dev UI + terminal simulation: `docker compose --profile terminal up --build` runs `main.py` alongside the web UI.
 - Production Compose: `docker-compose.prod.yml` spins up backend, Next.js frontend, and Nginx reverse proxy with persistent volumes.
 - `Dockerfile`: builds the Python env with `uv sync`, installs dependencies from `uv.lock`, and runs `uv run main.py`.
 - Deployment Scripts: `scripts/pre_deploy_check.sh` validates env/keys, `scripts/deploy.sh` builds Docker images, `scripts/setup_ec2.sh`/`setup_gcp*.sh` bootstrap cloud VMs.

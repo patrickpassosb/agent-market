@@ -3,10 +3,10 @@
 ## 1. Task Overview
 
 ### Task Title
-**Title:** Project health audit & EC2 deployment verification
+**Title:** Requirements + Docker readiness review
 
 ### Goal Statement
-**Goal:** Establish what "done" looks like today by auditing the health of the agent-market stack, identifying any missing pieces (tests, docs, features, automation), and validating whether the EC2 deployment is running and reproducible so the owner knows what to tackle next.
+**Goal:** Validate whether the project meets the Global Guidelines and Multi-Agent Marketplace Simulation Challenge requirements, and confirm Docker/Docker Compose + ignore files are correctly configured for reproducible runs.
 
 ---
 
@@ -28,37 +28,37 @@
 ## 3. Context & Problem Definition
 
 ### Problem Statement
-There is no single, up-to-date picture of the project status; the user is unsure which features/tests/deployments are missing, whether `main.py`/API/frontend still work, and whether the EC2 deployment is operational. Without clarity we cannot prioritize work or prove readiness for reviewers.
+There is no single, up-to-date picture of compliance with the challenge requirements and Docker readiness; the user needs a concrete assessment of gaps (docs, features, or runtime setup) and whether Docker artifacts are valid.
 
 ### Success Criteria
-- [ ] Inventory the current state of automated checks (tests, scripts) and confirm whether they pass locally.
-- [ ] Confirm whether the EC2 deployment described in README (via `scripts/setup_ec2.sh` + `scripts/deploy.sh`) has been executed or still needs work.
-- [ ] Document any obvious gaps (missing docs, failing scripts, outdated tasks) and propose the next concrete action items.
+- [ ] Map project artifacts to Global Guidelines and challenge requirements, highlighting passes and gaps.
+- [ ] Review `.dockerignore`, `.gitignore`, `Dockerfile`, `docker-compose.yml`, and `docker-compose.prod.yml` for correctness and reproducibility.
+- [ ] Validate Docker Compose configs using non-destructive checks (e.g., config parse) where feasible.
+- [ ] Document any gaps or risks that block reproducible runs, plus concrete next actions.
 
 ## 4. Development Mode Context
-- **🚨 Project Stage:** Pre-release/observability stage, ready to demo but needs final QA.
-- **Breaking Changes:** Avoid unless absolutely necessary for verification; prefer non-invasive checks.
-- **Data Handling:** Preserve existing `market.db`, logs, and generated artifacts.
-- **User Base:** Developers preparing for evaluation/demonstration.
-- **Priority:** Accuracy & completeness of the health report over rapid prototyping.
+- **🚨 Project Stage:** Pre-release, evaluation readiness check.
+- **Breaking Changes:** Avoid; this is an audit only.
+- **Data Handling:** Preserve `market.db`, logs, and generated artifacts.
+- **User Base:** Evaluators and project owner.
+- **Priority:** Accuracy and compliance reporting over any changes.
 
 ## 5. Technical Requirements
 
 ### Functional Requirements
-- Identify and run (if feasible) the key scripts that prove core functionality (e.g., `uv run python main.py`, backend server, frontend dashboard).
-- Review deployment scripts (`scripts/setup_ec2.sh`, `scripts/deploy.sh`) to summarize what they do and whether they have been applied.
-- Inspect recent logs, reports, or task files for evidence of success or outstanding work.
+- Identify evidence of a full simulation run and required artifacts (logs, plots, reports).
+- Review Docker assets (Dockerfile + Compose) for correct build/run flow.
+- Review ignore files for correctness (secrets, artifacts, build outputs).
 
 ### Non-Functional Requirements
-- **Performance:** No changes to runtime behavior; focus on observability.
-- **Security:** Do not expose secrets; mention that `.env` holds API keys.
-- **Usability:** Report should clearly state what is done vs missing.
+- **Performance:** No changes to runtime behavior; focus on verification.
+- **Security:** Do not expose secrets; mention `.env` or credential handling if relevant.
+- **Usability:** Report should clearly state compliance vs missing items.
 - **Responsive Design:** Not applicable for this audit.
 - **Theme Support:** Not applicable.
 
 ### Technical Constraints
 - Must not overwrite existing `.env` or database artifacts.
-- Maintain parity with instructions in existing `.agent/tasks` documents.
 
 ## 6. Data & Database Changes
 ### Database Schema Changes
@@ -91,17 +91,17 @@ There is no single, up-to-date picture of the project status; the user is unsure
 - N/A.
 
 ## 9. Implementation Plan
-1. Review README, `.env`, scripts, and relevant backend/frontend entry points to note current functionality and documented deployment steps.
-2. Run `uv run pytest tests/ -v` (if feasible) and summarize success/failure; if tests require credentials, note that they are blocked until keys are provided.
-3. Evaluate `scripts/setup_ec2.sh`, `scripts/deploy.sh`, and `docker-compose.prod.yml` to determine whether deployment artifacts align with README and whether additional steps are missing.
-4. Scan logs (`logs/`, `server.log`, etc.) for recent activity or errors that might indicate what is broken.
-5. Summarize findings in a short report listing working components, failing checks, and recommended next actions.
+1. Review README + technical docs + challenge docs to map requirements and evidence.
+2. Review Dockerfile and Compose files; validate Compose configuration when feasible.
+3. Review `.dockerignore` and `.gitignore` for completeness and risk.
+4. Scan logs/artifacts for evidence of full simulation run.
+5. Summarize compliance gaps, risks, and next actions.
 
 ## 10. Task Completion Tracking
-- [x] Step 1: Documentation & script review.
-- [x] Step 2: Local verification/tests.
-- [ ] Step 3: Deployment validation (scripts reviewed; remote verification still pending).
-- [x] Step 4: Log/status summary.
+- [x] Step 1: Requirements mapping review.
+- [x] Step 2: Docker & Compose review/validation.
+- [x] Step 3: Ignore files review.
+- [x] Step 4: Artifact/log evidence review.
 - [x] Step 5: Deliver final recommendations.
 
 ## 11. File Structure & Organization
@@ -120,5 +120,4 @@ Preserve existing formatting/styles; do not commit untested changes.
 ## 13. Second-Order Impact Analysis
 ### Impact Assessment
 - Be mindful that repeatedly running the full simulation (`main.py`) may mutate `market.db` and create log/plot artifacts; note this if commands are executed.
-- Deployment scripts may assume certain environment variables; confirm before running them.
-- Avoid destructive operations on EC2 (since permission unknown). EOF
+- Docker compose validation should be non-destructive (e.g., config parse).
