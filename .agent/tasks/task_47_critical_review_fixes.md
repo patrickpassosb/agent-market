@@ -66,9 +66,9 @@
 
 ## 10. Task Completion Tracking
 
-- [ ] Security Hardening
-- [ ] Transaction Atomicity
-- [ ] Edge Case Fixes
+- [x] Security Hardening
+- [x] Transaction Atomicity
+- [x] Edge Case Fixes
 
 ---
 

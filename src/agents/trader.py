@@ -253,10 +253,10 @@ class Trader(BaseAgent):
 
             if decision.action in ("buy", "sell"):
                 if not math.isfinite(decision.price) or decision.price <= 0:
-                    # Ensure tradable prices to avoid zero-trade runs.
-                    # Context7 /python/cpython (math docs).
+                    # Robust fallback for invalid LLM price output.
+                    # If current price is 0, we use a minimal tick (0.0001).
                     decision.price = (
-                        market_state.current_price if market_state.current_price > 0 else 0.001
+                        market_state.current_price if market_state.current_price > 0 else 0.0001
                     )
 
             # Log the reasoning to the agent's internal long-term memory so future

@@ -41,7 +41,7 @@ from src.market.schema import (
     InteractionLog,
 )
 from src.utils.checkpoints import build_checkpoint, write_checkpoint
-from src.utils.personas import PersonaStrategy, get_model_for_persona, select_strategies
+from src.utils.personas import get_model_for_persona, select_strategies
 
 # Suppress LiteLLM verbose logging completely
 litellm.set_verbose = False

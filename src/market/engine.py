@@ -121,95 +121,93 @@ class MarketEngine:
         action: AgentAction,
         item: str,
         price: float = 0.0,
+        agent_registry: dict[str, Any] | None = None,
     ) -> Transaction | None:
         """
         Processes an action submitted by an agent.
 
         This method acts as the central transaction coordinator. It:
         1. Validates the input arguments.
-        2. Routes the order to the single `OrderBook`.
-        3. If a match occurs, it validates the trade against the agent's `Portfolio`.
-        4. If valid, records the transaction in the `Ledger`.
+        2. Performs a pre-validation check on the initiating agent's portfolio.
+        3. Routes the order to the single `OrderBook`.
+        4. If a match occurs, it validates the counterparty's portfolio.
+        5. If BOTH are valid, records the transaction and updates BOTH portfolios.
 
         Args:
             agent (BaseAgent): The agent instance submitting the action.
-                               Must have a `portfolio` attribute.
             action (AgentAction): The type of action (BUY, SELL, HOLD, REFLECTION).
             item (str): The asset involved (e.g. "AAPL", "TSLA").
             price (float): The limit price for the order (in BTC).
+            agent_registry (dict): Optional mapping of agent_id to agent instances
+                                  for multi-agent portfolio updates.
 
         Returns:
             Optional[Transaction]: The resulting transaction if a trade occurred, else None.
         """
-        transaction = None
-
-        # HOLD or REFLECTION actions have no market impact
+        # 1. Basic Validation
         if action in (AgentAction.HOLD, AgentAction.REFLECTION):
             return None
 
-        # Validate Item
         if not isinstance(item, str) or item not in SUPPORTED_ASSETS:
             return None
 
-        # Validate Price
         if not isinstance(price, (int, float)) or not math.isfinite(price) or price <= 0:
             return None
 
+        # 2. Pre-validate Initiating Agent (Taker)
         if action == AgentAction.BUY:
+            if not agent.portfolio.has_funds(float(price)):
+                return None
             transaction = self.order_book.add_buy(agent.id, item, float(price))
 
-            # If trade matched, execute against portfolio
-            if transaction:
-                # Portfolio validation: Check if agent has enough BTC
-                success = agent.portfolio.execute_buy(
-                    item=transaction.item,
-                    quantity=1,  # TODO: Support variable quantities
-                    price=transaction.price,
-                )
-
-                if not success:
-                    # CONCEPTUAL FIX: Re-insert the popped order back into the book
-                    # transaction.seller_id (maker) had their order popped
-                    self.order_book.reinsert_order(
-                        agent_id=transaction.seller_id,
-                        item=transaction.item,
-                        price=transaction.price,
-                        is_buy=False,  # Re-insert as ask
-                    )
-                    return None
-
         elif action == AgentAction.SELL:
+            if not agent.portfolio.has_inventory(item, 1):
+                return None
             transaction = self.order_book.add_sell(agent.id, item, float(price))
-
-            # If trade matched, execute against portfolio
-            if transaction:
-                # Portfolio validation: Check if agent has the asset
-                success = agent.portfolio.execute_sell(
-                    item=transaction.item, quantity=1, price=transaction.price
-                )
-
-                if not success:
-                    # CONCEPTUAL FIX: Re-insert the popped order back into the book
-                    # transaction.buyer_id (maker) had their order popped
-                    self.order_book.reinsert_order(
-                        agent_id=transaction.buyer_id,
-                        item=transaction.item,
-                        price=transaction.price,
-                        is_buy=True,  # Re-insert as bid
-                    )
-                    return None
         else:
             return None
 
-        # If the order resulted in a trade AND portfolio execution succeeded
+        # 3. Handle Matching (Taker meets Maker)
+        if transaction:
+            # We matched an existing order in the book.
+            # We must ensure the Maker can still fulfill their side.
+            buyer = agent if action == AgentAction.BUY else None
+            seller = agent if action == AgentAction.SELL else None
+
+            # Resolve the counterparty from the registry
+            if agent_registry:
+                if action == AgentAction.BUY:
+                    seller = agent_registry.get(transaction.seller_id)
+                else:
+                    buyer = agent_registry.get(transaction.buyer_id)
+
+            # Atomic Commit: Only execute if BOTH sides are valid
+            # If registry is missing, we fallback to partial update (legacy/tests)
+            can_execute = True
+            if buyer and not buyer.portfolio.has_funds(transaction.price):
+                can_execute = False
+            if seller and not seller.portfolio.has_inventory(transaction.item, 1):
+                can_execute = False
+
+            if can_execute:
+                # COMMIT BOTH SIDES
+                if buyer:
+                    buyer.portfolio.execute_buy(transaction.item, 1, transaction.price)
+                if seller:
+                    seller.portfolio.execute_sell(transaction.item, 1, transaction.price)
+            else:
+                # Maker failed validation (state changed since order was placed).
+                # Transaction is aborted. Maker order is already popped from book.
+                # Taker (the current 'agent') should try again later.
+                return None
+
+        # 4. Finalize Successful Transaction
         if transaction:
             if self.run_id:
                 transaction.run_id = self.run_id
-            # 1. Persist to DB
             self.ledger.record_transaction(transaction)
             self.last_transaction = transaction
 
-            # 2. Update Market State for this asset
             self.current_prices[item] = transaction.price
             self.total_volume += 1
             self.price_history[item].append(transaction.price)

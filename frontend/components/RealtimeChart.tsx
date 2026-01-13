@@ -63,7 +63,7 @@ export default function RealtimeChart({ seriesData, symbol }: RealtimeChartProps
         axisPressedMouseMove: true,
       },
       width: containerRef.current.clientWidth,
-      height: 400,
+      height: containerRef.current.clientHeight,
     });
 
     const areaSeries = chart.addSeries(AreaSeries, {
@@ -79,9 +79,8 @@ export default function RealtimeChart({ seriesData, symbol }: RealtimeChartProps
     const resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
         if (!chartRef.current) return;
-        chartRef.current.applyOptions({
-          width: entry.contentRect.width,
-        });
+        // Context7 /tradingview/lightweight-charts (chart.resize for responsive sizing).
+        chartRef.current.resize(entry.contentRect.width, entry.contentRect.height);
       }
     });
 
@@ -101,7 +100,7 @@ export default function RealtimeChart({ seriesData, symbol }: RealtimeChartProps
   }, [seriesData]);
 
   return (
-    <div className="flex h-full flex-col gap-6">
+    <div className="flex h-full flex-col gap-6 overflow-hidden">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="rounded-lg bg-secondary/10 px-2 py-1 text-xs font-bold text-secondary border border-secondary/20">
@@ -115,7 +114,7 @@ export default function RealtimeChart({ seriesData, symbol }: RealtimeChartProps
           ))}
         </div>
       </div>
-      <div className="relative flex-1 min-h-[400px]">
+      <div className="relative flex-1 min-h-0">
         <div ref={containerRef} className="absolute inset-0" />
       </div>
     </div>

@@ -17,7 +17,12 @@ from src.analysis.report import generate_report
 from src.market.engine import MarketEngine
 from src.market.schema import SUPPORTED_ASSETS, InteractionLog
 from src.utils.checkpoints import build_checkpoint, write_checkpoint
-from src.utils.personas import PERSONA_MAP, get_model_for_persona, select_strategies, set_provider_order
+from src.utils.personas import (
+    PERSONA_MAP,
+    get_model_for_persona,
+    select_strategies,
+    set_provider_order,
+)
 
 
 class SimulationRunner:
@@ -192,7 +197,11 @@ class SimulationRunner:
 
                         # EXECUTE
                         tx = self.engine.process_action(
-                            agent, decision["action"], decision["item"], decision["price"]
+                            agent,
+                            decision["action"],
+                            decision["item"],
+                            decision["price"],
+                            agent_registry=self.agent_index,
                         )
                         if tx:
                             buyer_agent = self.agent_index.get(tx.buyer_id)

@@ -36,6 +36,7 @@ The dashboard visual language conflicts with the CloudWalk host branding. The UI
 - [ ] Replace neon/glow styling with a black-and-white palette.
 - [ ] Remove glassmorphism glow effects in favor of crisp borders.
 - [ ] Keep UI functionality and layout intact.
+- [ ] Remove the empty gap under Market Activity by letting the chart fill its container.
 
 ---
 
@@ -122,6 +123,7 @@ No changes.
 - [x] Updated global tokens and background styling.
 - [x] Simplified shared component styles (glass panels/cards/buttons).
 - [x] Verified hover/focus contrast without glow.
+- [x] Adjusted Market Activity chart to resize with its container.
 
 ---
 

@@ -457,7 +457,7 @@ export default function Dashboard() {
 
         {/* Center Column: Chart & Main Agent Roster */}
         <section className="flex flex-col gap-6">
-          <div className="glass-panel flex-1 rounded-[2.5rem] p-8">
+          <div className="glass-panel h-[360px] overflow-hidden rounded-[2.5rem] p-8 md:h-[420px]">
             <RealtimeChart key={activeSymbol} seriesData={activeSeries} symbol={activeSymbol} />
           </div>
           <div className="glass-panel max-h-[400px] rounded-[2.5rem] p-8 overflow-y-auto">
